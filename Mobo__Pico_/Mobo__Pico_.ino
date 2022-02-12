@@ -1,4 +1,4 @@
-#define VERSION "4.0.002b"
+#define VERSION "4.0.003b"
 
 #define DEBUG false
 #define LED_PIN 25
@@ -288,8 +288,8 @@ void handleIncoming()
       
       motor1Speed = 100.0 * frontLSpeed;
       motor2Speed = 100.0 * frontRSpeed;
-      motor3Speed = 100.0 * rearLSpeed;
-      motor4Speed = 100.0 * rearRSpeed;
+      motor3Speed = 100.0 * rearRSpeed;
+      motor4Speed = 100.0 * rearLSpeed;
       /*
       #if DEBUG
       Serial.println("Received telem: " + String(incoming.payload.telem.heading));
