@@ -1,4 +1,4 @@
-#define VERSION "4.0.003b"
+#define VERSION "4.0.004b"
 
 #define DEBUG false
 #define LED_PIN 25
@@ -248,34 +248,37 @@ void handleIncoming()
       delay(5);
       digitalWrite(LED_PIN, 0);
       Telem &t = incoming.payload.telem;
-      
-      float ljx = ((float(t.ljx * 2) / 1023.0) - 1.0);
-      float ljy = ((float(t.ljy * 2) / 1023.0) - 1.0);
-      float ljm = sqrt(ljx * ljx + ljy * ljy);
-      ljx /= ljm;
-      ljy /= ljm;
-      float overallHeading = atan2(ljy, ljx);
-      
-      float rjx = ((float(t.rjx * 2) / 1023.0) - 1.0);
-      
-      float frontHeading = overallHeading - 0.5 * PI * rjx;
-      float rearHeading = overallHeading + 0.5 * PI * rjx;
 
+      float front_ljx = ((float(t.ljx * 2) / 1023.0) - 1.0);
+      float rear_ljx = front_ljx;
+      
+      float front_ljy = ((float(t.ljy * 2) / 1023.0) - 1.0);
+      float rear_ljy = ljy;
+
+      float rjx = ((float(t.rjx * 2) / 1023.0) - 1.0);
+      front_ljx += rjx;
+      rear_ljx -= rjx;
+      
+      float front_ljm = sqrt(front_ljx * front_ljx + front_ljy * front_ljy);
+      float rear_ljm = sqrt(rear_ljx * rear_ljx + rear_ljy * rear_ljy);
+
+      front_ljx /= front_ljm;
+      front_ljy /= front_ljm;
+
+      rear_ljx /= rear_ljm;
+      rear_ljy /= rear_ljm;
+
+      float frontHeading = atan2(front_ljy, front_ljx);
+      float rearHeading = atan2(rear_ljy, rear_ljx);
+      
       #if DEBUG
       Serial.println("(" + String(frontHeading) + ", " + String(rearHeading) + ")");
       #endif
-      /*
-      float rjy = ((float(t.rjy * 2) / 1023.0) - 1.0);
-      float rjm = sqrt(rjx * rjx + rjy * rjy);
-      rjx /= rjm;
-      rjy /= rjm;
-      float rh = atan2(rjy, rjx);
-      */
-
-      float frontLSpeed = sin(0.25 * PI + frontHeading) * ljm;
-      float frontRSpeed = sin(-0.25 * PI + frontHeading) * ljm;
-      float rearLSpeed = sin(-0.25 * PI + rearHeading) * ljm;
-      float rearRSpeed = sin(0.25 * PI + rearHeading) * ljm;
+      
+      float frontLSpeed = sin(0.25 * PI + frontHeading) * front_ljm;
+      float frontRSpeed = sin(-0.25 * PI + frontHeading) * front_ljm;
+      float rearLSpeed = sin(-0.25 * PI + rearHeading) * rear_ljm;
+      float rearRSpeed = sin(0.25 * PI + rearHeading) * rear_ljm;
 
       if(frontLSpeed > 1.0) frontLSpeed = 1.0;
       if(frontLSpeed < -1.0) frontLSpeed = -1.0;
