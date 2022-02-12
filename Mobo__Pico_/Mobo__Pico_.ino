@@ -1,4 +1,4 @@
-#define VERSION "4.0.001b"
+#define VERSION "4.0.002b"
 
 #define DEBUG false
 #define LED_PIN 25
@@ -272,10 +272,10 @@ void handleIncoming()
       float rh = atan2(rjy, rjx);
       */
 
-      float frontLSpeed = sin(-0.25 * PI + frontHeading) * ljm;
-      float frontRSpeed = sin(0.25 * PI + frontHeading) * ljm;
-      float rearLSpeed = sin(0.25 * PI + rearHeading) * ljm;
-      float rearRSpeed = sin(-0.25 * PI + rearHeading) * ljm;
+      float frontLSpeed = sin(0.25 * PI + frontHeading) * ljm;
+      float frontRSpeed = sin(-0.25 * PI + frontHeading) * ljm;
+      float rearLSpeed = sin(-0.25 * PI + rearHeading) * ljm;
+      float rearRSpeed = sin(0.25 * PI + rearHeading) * ljm;
 
       if(frontLSpeed > 1.0) frontLSpeed = 1.0;
       if(frontLSpeed < -1.0) frontLSpeed = -1.0;
@@ -286,8 +286,8 @@ void handleIncoming()
       if(rearRSpeed > 1.0) rearRSpeed = 1.0;
       if(rearRSpeed < -1.0) rearRSpeed = -1.0;
       
-      motor1Speed = 100.0 * frontRSpeed;
-      motor2Speed = 100.0 * frontLSpeed;
+      motor1Speed = 100.0 * frontLSpeed;
+      motor2Speed = 100.0 * frontRSpeed;
       motor3Speed = 100.0 * rearLSpeed;
       motor4Speed = 100.0 * rearRSpeed;
       /*
