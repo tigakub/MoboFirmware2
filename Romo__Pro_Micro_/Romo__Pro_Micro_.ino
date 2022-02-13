@@ -1,11 +1,11 @@
-#define VERSION "4.0.001b"
-
-#include <SPI.h>
-#include "RF24.h"
+#define VERSION "4.2.001b"
 
 #define DEBUG false
-
 #define LED_PIN 17
+
+//* RF ****************************************************************************************************************
+#include <SPI.h>
+#include "RF24.h"
 
 const uint64_t address[] = { 0x123456789ALL, 0xA987654321LL };
 
@@ -39,6 +39,19 @@ Msg incoming, outgoing;
 #define MSG_THROTTLE_PERIOD 66
 unsigned long msgThrottleTime;
 
+//* IMU ****************************************************************************************************************
+#include <Wire.h>
+
+#include <Adafruit_Sensor.h>
+#include <Adafruit_BNO055.h>
+#include <utility/imumaths.h>
+
+Adafruit_BNO055 bno(55, 0x28);
+#define IMU_THROTTLE_PERIOD 100
+unsigned long imuThrottle;
+sensors_event_t imuEvent;
+
+//* WATCHDOG ****************************************************************************************************************
 #include <avr/wdt.h>
 #define WATCHDOG_PERIOD 5000
 unsigned long watchdogTime;
@@ -60,204 +73,8 @@ class Watchdog
 
 Watchdog watchdog;
 
-class RadioStream : public Stream
-{
-  public:
-    RadioStream(RF24 &iRadio)
-    : Stream(), radio(iRadio) { }
-
-    virtual int available() {
-      return radio.available();
-    }
-
-    virtual int read() {
-      uint8_t buf;
-      byte pipeNo;
-      if(radio.available(&pipeNo)) {
-        radio.read(&buf, 1);
-        return buf;
-      }
-      return -1;
-    }
-
-    virtual int peek() {
-      return 0;
-    }
-
-    virtual void flush() {
-      radio.flush_tx();
-    }
-
-    virtual size_t write(uint8_t iBuf) {
-      size_t result = 1;
-      radio.stopListening();
-      if(!radio.write(&iBuf, 1)) {
-        result = -1;
-      }
-      flush();
-      radio.startListening();
-      return result;
-    }
-
-  protected:
-    RF24 &radio;
-};
-
-/*
-const uint32_t SIGNATURE 0x6f626f6dL
-
-class ByteBanger
-{
-  protected:
-    typedef enum {
-      IDL = 0,
-      SIG = 1,
-      LEN = 2,
-      PAY = 3
-    } Mode;
-    
-  public:
-    ByteBanger(Stream &iStream)
-    : stream(iStream), sendBuffer(NULL), sendIndex(0), sendCount(0), signature(0), signatureMask(0), recvMode(0), recvBuffer(NULL), recvIndex(0), recvCount(0)
-    { }
-    
-    uint8_t bang() {
-      uint8_t result = 0;
-      switch(sendMode) {
-        case IDL:
-          if(sendBuffer != NULL) {
-            sendIndex = 0;
-            sendPtr = (const uint8_t *) &SIGNATURE
-            sendCount = sizeof(uint32_t);
-            sendMode = SIG;
-          }
-          break;
-        case SIG:
-          if(sendIndex < sendCount) {
-            radio.write(sendPtr[sendIndex]);
-            sendIndex++;
-          } else {
-            sendIndex = 0;
-            sendPtr = (uint8_t *) &payLength;
-            sendCount = sizeof(uint8_t);
-            sendMode = LEN;
-          }
-          break;
-        case LEN:
-          if(sendIndex < sendCount) {
-            radio.write(sendPtr[sendIndex]);
-            sendIndex++;
-          } else {
-            sendIndex = 0;
-            sendPtr = (uint8_t *) sendBuffer;
-            sendCount = payLength;
-            sendMode = PAY;
-          }
-        case PAY:
-          if(sendIndex < sendCount) {
-            radio.write(sendPtr[sendIndex]);
-            sendIndex++;
-          } else {
-            sendIndex = 0;
-            sendPtr = NULL;
-            sendBuffer = NULL;
-            sendCount = 0;
-            sendMode = IDL;
-            result |= 1
-          }
-      }
-      switch(recvMode) {
-        case IDL:
-        case SIG:
-        case LEN:
-        case PAY:
-      }
-      if(sendIndex < sendCount) {
-        if(!sending) {
-          sending = true;
-        }
-        stream.write(sendBuffer[sendIndex]);
-        sendIndex++;
-        if(sendIndex == sendCount) {
-          result |= 1;
-          sending = false;
-        }
-      }
-      if(recvIndex < recvCount) {
-        
-        if(!receiving) {
-          signature = 0;
-          signatureMask = 0;
-          bool signatureFound = false;
-          uint32_t signature = 0;
-          while(!signatureFound) {
-            int thisByte = stream.read();
-            if((((thisByte & 0xff) << 8) | (lastByte & 0xff)) != ) {
-              lastByte = thisByte;
-            }
-          }
-        }
-        stream.read(recvBuffer[recvIndex]);
-        recvIndex++;
-        if(recvIndex == recvCount) {
-          result |= 2;
-          receiving = false;
-        }
-      }
-      return result;
-    }
-
-  protected:
-    bool scanForSignature(uint32_t &ioSignature, uint8_t &ioIndex, uint32_t iIncomingByte) {
-      uint32_t mask = (-1) << (8 * (4 - ioIndex));
-      iIncomingByte &= 0xff;
-      uint32_t shiftedByte = iIncomingByte;
-      shiftedByte <= (8 * (4 - ioIndex));
-      ioSignature |= shiftedByte;
-      if(ioSignature == SIGNATURE & mask) {
-        if(ioIndex == 4) return true;
-        ioIndex++;
-      } else {
-        if(iIncomingByte == (SIGNATURE >> 24)) {
-          ioIndex = 1;
-          ioSignature = iIncomingByte << 24;
-        } else {
-          ioIndex = 0;
-          ioSignature = 0;
-        }
-      }
-      return false;
-    }
-
-  protected:
-    Stream &stream;
-    Mode sendMode;
-    uint8_t *sendBuffer;
-    uint8_t *sendPtr;
-    uint8_t sendIndex;
-    uint8_t sendCount;
-    Mode recvMode;
-    uint8_t *recvBuffer;
-    uint8_t *recvPtr;
-    uint8_t recvIndex;
-    uint8_t recvCount;
-};
-*/
-void setup() {
-  pinMode(LED_PIN, OUTPUT);
-  
-  #if DEBUG
-  while(!Serial) {
-    Serial.begin(115200);
-    delay(1000);
-  }
-  #endif
-  
-  #if DEBUG
-  Serial.println("Romo (Pro Micro)");
-  Serial.println(VERSION);
-  #endif
-  
+//* RF SETUP ********************************
+void rfSetup() {
   while(!radio.begin()) {
     #if DEBUG
     Serial.println("RF failed to initialize nRF24L01");
@@ -285,9 +102,45 @@ void setup() {
   radio.openReadingPipe(1, address[!radioNumber]);
 
   radio.startListening();
-
+  
   msgThrottleTime = millis();
+}
 
+//* IMU SETUP ********************************
+void imuSetup() {
+  bool bnoReady = bno.begin();
+  #if DEBUG
+  if(!bnoReady) {
+    Serial.println("BNO055 failure");
+  } else {
+    Serial.println("BNO055 online");
+  }
+  #endif
+
+  adafruit_bno055_offsets_t bnoCalibData;
+  bnoCalibData.accel_offset_x = 40;
+  bnoCalibData.accel_offset_y = -47;
+  bnoCalibData.accel_offset_z = -2;
+  
+  bnoCalibData.mag_offset_x = 211;
+  bnoCalibData.mag_offset_y = 78;
+  bnoCalibData.mag_offset_z = -316;
+  
+  bnoCalibData.gyro_offset_x = -2;
+  bnoCalibData.gyro_offset_y = 1;
+  bnoCalibData.gyro_offset_z = 0;
+  
+  bnoCalibData.accel_radius = 1000;
+  bnoCalibData.mag_radius = 669;
+  bno.setSensorOffsets(bnoCalibData);
+  
+  bno.setExtCrystalUse(true);
+
+  imuThrottle = millis();
+}
+
+//* WATCHDOG SETUP ********************************
+void watchdogSetup() {
   watchdog.stop();
   delay(WATCHDOG_PERIOD);
   watchdog.start(WATCHDOG_PERIOD);
@@ -296,13 +149,45 @@ void setup() {
   #endif
 }
 
+//* MAIN SETUP ****************************************************
+void setup() {
+  pinMode(LED_PIN, OUTPUT);
+  
+  #if DEBUG
+  while(!Serial) {
+    Serial.begin(115200);
+    delay(1000);
+  }
+  #endif
+  
+  #if DEBUG
+  Serial.println("Romo (Pro Micro)");
+  Serial.println(VERSION);
+  #endif
+
+  rfSetup();
+  imuSetup();
+  watchdogSetup();
+}
+
+uint32_t currentTime;
+
+//* IMU LOOP ****************************************************
+void imuLoop() {
+  if((currentTime - imuThrottle) > IMU_THROTTLE_PERIOD) {
+    imuThrottle = currentTime;
+    bno.getEvent(&imuEvent);
+  }
+}
+
+//* RF LOOP ****************************************************
 bool sendMsg()
 {
   bool result = false;
   radio.stopListening();
   // radio.flush_tx(); // Automatically called by stopListening
   uint8_t i = 0;
-  radio.writeFast((const void *) &outgoing, (uint8_t) sizeof(Msg));
+  radio.writeFast(static_cast<const void *>(&outgoing), static_cast<uint8_t>(sizeof(Msg)));
   if(!radio.txStandBy(1000)) {
     // radio.reUseTX();
   } else {
@@ -330,11 +215,9 @@ void handleIncoming()
   }
 }
 
-void loop() {
-  unsigned long currentTime = millis();
-  
+void rfLoop() {
   if(radio.available()) {
-    radio.read(((uint8_t *) &incoming), sizeof(Msg));
+    radio.read(static_cast<void *>(&incoming), sizeof(Msg));
     handleIncoming();
   }
 
@@ -344,7 +227,7 @@ void loop() {
     outgoing.payload.telem.ljy = analogRead(A1);
     outgoing.payload.telem.rjx = analogRead(A2);
     outgoing.payload.telem.rjy = analogRead(A3);
-    outgoing.payload.telem.heading++;
+    outgoing.payload.telem.heading = imuEvent.orientation.x;
     if(!sendMsg()) {
       #if DEBUG
       Serial.println("Failed to send telem msg");
@@ -352,4 +235,11 @@ void loop() {
     }
     msgThrottleTime = currentTime;
   }
+}
+
+//* MAIN LOOP ****************************************************
+void loop() {
+  currentTime = millis();
+  imuLoop();
+  rfLoop();
 }

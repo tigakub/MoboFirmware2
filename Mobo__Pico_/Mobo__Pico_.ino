@@ -1,4 +1,4 @@
-#define VERSION "4.0.004b"
+#define VERSION "4.2.001b"
 
 #define DEBUG false
 #define LED_PIN 25
@@ -25,6 +25,7 @@ typedef struct Telem {
 
 typedef struct Ping {
   uint32_t pingCount;
+  int32_t heading;
 } Ping;
 
 typedef struct Msg {
@@ -44,7 +45,6 @@ unsigned long pingThrottleTime;
 uint32_t pingCount = 0;
 
 //* MOTOR ****************************************************************************************************************
-
 #include <RP2040_PWM.h>
 
 #define PWM_FREQ 2000
@@ -86,59 +86,44 @@ int breakState = HIGH;
 float frontVel[2];
 float rearVel[2];
 
-//* WATCHDOG ****************************************************************************************************************
+//* IMU ****************************************************************************************************************
+#include <Wire.h>
 
+#include <Adafruit_Sensor.h>
+#include <Adafruit_BNO055.h>
+#include <utility/imumaths.h>
+
+MbedI2C picoI2C(0, 1); // SDA, SCL
+
+Adafruit_BNO055 bno(55, 0x28, &picoI2C);
+#define IMU_THROTTLE_PERIOD 100
+unsigned long imuThrottle;
+sensors_event_t imuEvent;
+
+#include <Adafruit_NeoPixel.h>
+
+#define NEOPIXEL_COUNT 16
+#define NEOPIXEL_PIN 28
+Adafruit_NeoPixel neoPixels(NEOPIXEL_COUNT, NEOPIXEL_PIN, NEO_GRB + NEO_KHZ800);
+#define NEOPIXEL_THROTTLE_PERIOD 100
+unsigned long neoPixelThrottle;
+
+//* NEOPIXEL ****************************************************************************************************************
+#define NEOPIXEL_PULSE_DELAY 10
+unsigned long neoPixelPulseTimer;
+float neoPixelPulseValue = 0.0;
+float neoPixelPulseBase = 0.0;
+float neoPixelPulseStep = 1.0 / 64.0;
+#define NEOPIXEL_PULSE_START 0.5
+int remoteHeading;
+
+//* WATCHDOG ****************************************************************************************************************
 #define WATCHDOG_PERIOD 4000
 unsigned long watchdogTime;
 
 #include <Watchdog.h>
 #define watchdog (mbed::Watchdog::get_instance())
 #define feed kick
-
-/*
-class RadioStream : public Stream
-{
-  public:
-    RadioStream(RF24 &iRadio)
-    : Stream(), radio(iRadio) { }
-
-    virtual int available() {
-      return radio.available();
-    }
-
-    virtual int read() {
-      uint8_t buf;
-      byte pipeNo;
-      if(radio.available(&pipeNo)) {
-        radio.read(&buf, 1);
-        return buf;
-      }
-      return -1;
-    }
-
-    virtual int peek() {
-      return 0;
-    }
-
-    virtual void flush() {
-      radio.flush_tx();
-    }
-
-    virtual size_t write(uint8_t iBuf) {
-      size_t result = 1;
-      radio.stopListening();
-      if(!radio.write(&iBuf, 1)) {
-        result = -1;
-      }
-      flush();
-      radio.startListening();
-      return result;
-    }
-
-  protected:
-    RF24 &radio;
-};
-*/
 
 //* RF SETUP ********************************
 void rfSetup() {
@@ -194,16 +179,57 @@ void motorSetup() {
   pinMode(MOTOR4_ALM_PIN, INPUT);
 }
 
+//* IMU SETUP ********************************
+void imuSetup() {
+  bool bnoReady = bno.begin();
+  #if DEBUG
+  if(!bnoReady) {
+    Serial.println("BNO055 failure");
+  } else {
+    Serial.println("BNO055 online");
+  }
+  #endif
+
+  adafruit_bno055_offsets_t bnoCalibData;
+  bnoCalibData.accel_offset_x = 40;
+  bnoCalibData.accel_offset_y = -47;
+  bnoCalibData.accel_offset_z = -2;
+  
+  bnoCalibData.mag_offset_x = 211;
+  bnoCalibData.mag_offset_y = 78;
+  bnoCalibData.mag_offset_z = -316;
+  
+  bnoCalibData.gyro_offset_x = -2;
+  bnoCalibData.gyro_offset_y = 1;
+  bnoCalibData.gyro_offset_z = 0;
+  
+  bnoCalibData.accel_radius = 1000;
+  bnoCalibData.mag_radius = 669;
+  bno.setSensorOffsets(bnoCalibData);
+  
+  bno.setExtCrystalUse(true);
+
+  imuThrottle = millis();
+}
+
+//* NEOPIXEL SETUP ********************************
+void neopixelSetup() {
+  neoPixels.begin();
+  neoPixelThrottle = millis();
+  neoPixelPulseTimer = millis();
+}
+
 //* WATCHDOG SETUP ********************************
 void watchdogSetup() {
   watchdog.stop();
   delay(WATCHDOG_PERIOD);
-  // watchdog.start(WATCHDOG_PERIOD);
+  watchdog.start(WATCHDOG_PERIOD);
   #if DEBUG
   Serial.println("Watchdog deployed");
   #endif
 }
 
+//* MAIN SETUP ****************************************************
 void setup() {
   pinMode(LED_PIN, OUTPUT);
   
@@ -221,16 +247,29 @@ void setup() {
 
   rfSetup();
   motorSetup();
+  imuSetup();
+  neopixelSetup();
   watchdogSetup();
 }
 
+uint32_t currentTime;
+
+//* IMU LOOP ****************************************************
+void imuLoop() {
+  if((currentTime - imuThrottle) > IMU_THROTTLE_PERIOD) {
+    imuThrottle = currentTime;
+    bno.getEvent(&imuEvent);
+  }
+}
+
+//* RF LOOP ****************************************************
 bool sendMsg()
 {
   bool result = false;
   radio.stopListening();
   radio.flush_tx();
   uint8_t i = 0;
-  if(!radio.write((const void *) &outgoing, (uint8_t) sizeof(Msg))) {
+  if(!radio.write(static_cast<const void *>(&outgoing), static_cast<uint8_t>(sizeof(Msg)))) {
     radio.reUseTX();
   } else {
     result = true;
@@ -239,25 +278,48 @@ bool sendMsg()
   return result;
 }
 
+#define USE_IMU_FOR_ORIENTATION false
+
 void handleIncoming()
 {
   switch(incoming.msgId) {
     case TELEM:
+      remoteHeading = incoming.payload.telem.heading;
+
+      #if USE_IMU_FOR_ORIENTATION
+      float normalizedLocalHeading = static_cast<float>(imuEvent.orientation.x) / 359.0;
+      float normalizedRemoteHeading = static_cast<float>((remoteHeading + 540) % 360) / 359.0;
+      if(normalizedLocalHeading > 0.5) normalizedLocalHeading = 0.5 - normalizedLocalHeading;
+      if(normalizedRemoteHeading > 0.5) normalizedRemoteHeading = 0.5 - normalizedRemoteHeading;
+      float headingDifferential = normalizedLocalHeading - normalizedRemoteHeading;
+      #endif
+      
       digitalWrite(LED_PIN, 1);
       watchdog.feed();
       delay(5);
       digitalWrite(LED_PIN, 0);
       Telem &t = incoming.payload.telem;
 
-      float front_ljx = ((float(t.ljx * 2) / 1023.0) - 1.0);
+      float front_ljx = ((static_cast<float>(t.ljx * 2) / 1023.0) - 1.0);
       float rear_ljx = front_ljx;
       
-      float front_ljy = ((float(t.ljy * 2) / 1023.0) - 1.0);
-      float rear_ljy = ljy;
+      float front_ljy = ((static_cast<float>(t.ljy * 2) / 1023.0) - 1.0);
+      float rear_ljy = front_ljy;
 
-      float rjx = ((float(t.rjx * 2) / 1023.0) - 1.0);
+      float rjx = (2.0 * pow((static_cast<float>(t.rjx) / 1023.0), 2) - 1.0);
+      float rjy = 0.0;
+      
+      #if USE_IMU_FOR_ORIENTATION
+      rjx = 100.0 * headingDifferential * fabs(headingDifferential);
+      #else
+      rjx = ((static_cast<float>(t.rjx * 2) / 1023.0) - 1.0);;
+      #endif
+      
       front_ljx += rjx;
+      front_ljy += rjy;
+      
       rear_ljx -= rjx;
+      rear_ljy -= rjy;
       
       float front_ljm = sqrt(front_ljx * front_ljx + front_ljy * front_ljy);
       float rear_ljm = sqrt(rear_ljx * rear_ljx + rear_ljy * rear_ljy);
@@ -268,17 +330,17 @@ void handleIncoming()
       rear_ljx /= rear_ljm;
       rear_ljy /= rear_ljm;
 
-      float frontHeading = atan2(front_ljy, front_ljx);
-      float rearHeading = atan2(rear_ljy, rear_ljx);
+      float frontHeading = atan2(front_ljx, front_ljy); // - headingDifferential;
+      float rearHeading = atan2(rear_ljx, rear_ljy); // - headingDifferential;
       
       #if DEBUG
       Serial.println("(" + String(frontHeading) + ", " + String(rearHeading) + ")");
       #endif
       
-      float frontLSpeed = sin(0.25 * PI + frontHeading) * front_ljm;
-      float frontRSpeed = sin(-0.25 * PI + frontHeading) * front_ljm;
-      float rearLSpeed = sin(-0.25 * PI + rearHeading) * rear_ljm;
-      float rearRSpeed = sin(0.25 * PI + rearHeading) * rear_ljm;
+      float frontLSpeed = cos(0.25 * PI - frontHeading) * front_ljm;
+      float frontRSpeed = cos(-0.25 * PI - frontHeading) * front_ljm;
+      float rearLSpeed = cos(-0.25 * PI - rearHeading) * rear_ljm;
+      float rearRSpeed = cos(0.25 * PI - rearHeading) * rear_ljm;
 
       if(frontLSpeed > 1.0) frontLSpeed = 1.0;
       if(frontLSpeed < -1.0) frontLSpeed = -1.0;
@@ -293,21 +355,13 @@ void handleIncoming()
       motor2Speed = 100.0 * frontRSpeed;
       motor3Speed = 100.0 * rearRSpeed;
       motor4Speed = 100.0 * rearLSpeed;
-      /*
-      #if DEBUG
-      Serial.println("Received telem: " + String(incoming.payload.telem.heading));
-      #endif
-      */
       break;
   }
 }
 
-uint32_t currentTime;
-
-//* RF LOOP ****************************************************
 void rfLoop() {
   if(radio.available()) {
-    radio.read(((uint8_t *) &incoming), sizeof(Msg));
+    radio.read(static_cast<void *>(&incoming), sizeof(Msg));
     handleIncoming();
   }
 
@@ -318,6 +372,7 @@ void rfLoop() {
   if((currentTime - pingThrottleTime) > PING_PERIOD) {
     outgoing.msgId = PING;
     outgoing.payload.ping.pingCount = pingCount;
+    outgoing.payload.ping.heading = imuEvent.orientation.x;
     pingCount++;
     if(!sendMsg()) {
       #if DEBUG
@@ -344,8 +399,49 @@ void motorLoop() {
   }
 }
 
+//* NEOPIXEL LOOP ****************************************************
+float intensity(float x, float shift)
+{
+  return 1.0 - sqrt(cos(PI * (fmod(1.0 + x - shift, 1.0) - 0.5)));
+}
+
+void neopixelLoop() {
+  if((currentTime - neoPixelPulseTimer) > NEOPIXEL_PULSE_DELAY) {
+    neoPixelPulseTimer = currentTime;
+    neoPixelPulseBase += neoPixelPulseStep;
+    if(neoPixelPulseBase >= 1.0) {
+      neoPixelPulseBase = 1.0;
+      neoPixelPulseStep = -neoPixelPulseStep;
+    }
+    if(neoPixelPulseBase <= 0.0) {
+      neoPixelPulseBase = 0.0;
+      neoPixelPulseStep = fabs(neoPixelPulseStep);
+    }
+    neoPixelPulseValue = (NEOPIXEL_PULSE_START + (1.0 - NEOPIXEL_PULSE_START) * pow(neoPixelPulseBase, 5.0));
+  }
+  
+  if((currentTime - neoPixelThrottle) > NEOPIXEL_THROTTLE_PERIOD) {
+    neoPixelThrottle = currentTime;
+    
+    float normalized = (static_cast<float>(imuEvent.orientation.x) - remoteHeading) / 359.0;
+    float r, g, b;
+    for(int i = 0; i < 16; i++) {
+      r = pow(intensity(static_cast<float>(i) / 15.0, normalized), 2.0) * neoPixelPulseValue;
+      g = r * 31.0;
+      b = (1.0 - r) * 63.0;
+      r *= 255.0;
+      neoPixels.setPixelColor(i, neoPixels.Color(r, g, b));
+    }
+    
+    neoPixels.show();
+  }
+}
+
+//* MAIN LOOP ****************************************************
 void loop() {
   currentTime = millis();
+  imuLoop();
   rfLoop();
+  neopixelLoop();
   motorLoop();
 }
