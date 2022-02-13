@@ -1,4 +1,4 @@
-#define VERSION "4.2.001b"
+#define VERSION "4.2.003b"
 
 #define DEBUG false
 #define LED_PIN 25
@@ -116,6 +116,10 @@ float neoPixelPulseBase = 0.0;
 float neoPixelPulseStep = 1.0 / 64.0;
 #define NEOPIXEL_PULSE_START 0.5
 int remoteHeading;
+
+//* KEEP_ALIVE ****************************************************************************************************************
+#define KEEP_ALIVE_PERIOD 250
+unsigned long keepAliveTime;
 
 //* WATCHDOG ****************************************************************************************************************
 #define WATCHDOG_PERIOD 4000
@@ -285,7 +289,7 @@ void handleIncoming()
   switch(incoming.msgId) {
     case TELEM:
       remoteHeading = incoming.payload.telem.heading;
-
+      
       #if USE_IMU_FOR_ORIENTATION
       float normalizedLocalHeading = static_cast<float>(imuEvent.orientation.x) / 359.0;
       float normalizedRemoteHeading = static_cast<float>((remoteHeading + 540) % 360) / 359.0;
@@ -300,20 +304,29 @@ void handleIncoming()
       digitalWrite(LED_PIN, 0);
       Telem &t = incoming.payload.telem;
 
-      float front_ljx = ((static_cast<float>(t.ljx * 2) / 1023.0) - 1.0);
+      // Dead zones for joysticks
+      float front_ljx = 0.0;
+      if(t.ljx < 500) front_ljx = (static_cast<float>(t.ljx) - 500.0) / 500.0;
+      if(t.ljx > 523) front_ljx = (static_cast<float>(t.ljx) - 523.0) / 500.0;
       float rear_ljx = front_ljx;
-      
-      float front_ljy = ((static_cast<float>(t.ljy * 2) / 1023.0) - 1.0);
+
+      float front_ljy = 0.0;
+      if(t.ljy < 500) front_ljy = (static_cast<float>(t.ljy) - 500.0) / 500.0;
+      if(t.ljy > 523) front_ljy = (static_cast<float>(t.ljy) - 523.0) / 500.0;
       float rear_ljy = front_ljy;
 
-      float rjx = (2.0 * pow((static_cast<float>(t.rjx) / 1023.0), 2) - 1.0);
-      float rjy = 0.0;
-      
       #if USE_IMU_FOR_ORIENTATION
-      rjx = 100.0 * headingDifferential * fabs(headingDifferential);
+      float rjx = 100.0 * headingDifferential * fabs(headingDifferential);
       #else
-      rjx = ((static_cast<float>(t.rjx * 2) / 1023.0) - 1.0);;
+      // Parabolic response obviates need for dead zone on the right stick
+      /*
+      float rjx = 0.0;
+      if(t.rjx < 500) rjx = -pow((static_cast<float>(t.rjx) - 500.0) / 500.0, 2.0);
+      if(t.rjx > 523) rjx = pow((static_cast<float>(t.rjx) - 523.0) / 500.0, 2.0);
+      */
+      float rjx = 2.0 * static_cast<float>(t.rjx) / 1023.0 - 1.0; rjx *= fabs(rjx);
       #endif
+      float rjy = 0.0;
       
       front_ljx += rjx;
       front_ljy += rjy;
@@ -355,6 +368,8 @@ void handleIncoming()
       motor2Speed = 100.0 * frontRSpeed;
       motor3Speed = 100.0 * rearRSpeed;
       motor4Speed = 100.0 * rearLSpeed;
+      
+      keepAliveTime = millis();
       break;
   }
 }
@@ -385,6 +400,7 @@ void rfLoop() {
 
 //* MOTOR LOOP ****************************************************
 void motorLoop() {
+  breakState = ((currentTime - keepAliveTime) <= KEEP_ALIVE_PERIOD);
   digitalWrite(MOTOR_BRK_PIN, breakState);
   if(breakState) {
     motor1pwm->setPWM(MOTOR1_PWM_PIN, PWM_FREQ, abs(motor1Speed));
@@ -396,6 +412,12 @@ void motorLoop() {
     digitalWrite(MOTOR2_DIR_PIN, motor2Speed < 0.0);
     digitalWrite(MOTOR3_DIR_PIN, motor3Speed < 0.0);
     digitalWrite(MOTOR4_DIR_PIN, motor4Speed > 0.0);
+  } else {
+    motor1pwm->setPWM(MOTOR1_PWM_PIN, PWM_FREQ, 0);
+    motor2pwm->setPWM(MOTOR2_PWM_PIN, PWM_FREQ, 0);
+    motor3pwm->setPWM(MOTOR3_PWM_PIN, PWM_FREQ, 0);
+    motor4pwm->setPWM(MOTOR4_PWM_PIN, PWM_FREQ, 0);
+    
   }
 }
 
