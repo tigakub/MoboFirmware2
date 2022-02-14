@@ -1,4 +1,4 @@
-#define VERSION "4.2.003b"
+#define VERSION "4.2.004b"
 
 #define DEBUG false
 #define LED_PIN 25
@@ -408,10 +408,10 @@ void motorLoop() {
     motor3pwm->setPWM(MOTOR3_PWM_PIN, PWM_FREQ, abs(motor3Speed));
     motor4pwm->setPWM(MOTOR4_PWM_PIN, PWM_FREQ, abs(motor4Speed));
     
-    digitalWrite(MOTOR1_DIR_PIN, motor1Speed > 0.0);
-    digitalWrite(MOTOR2_DIR_PIN, motor2Speed < 0.0);
-    digitalWrite(MOTOR3_DIR_PIN, motor3Speed < 0.0);
-    digitalWrite(MOTOR4_DIR_PIN, motor4Speed > 0.0);
+    digitalWrite(MOTOR1_DIR_PIN, motor1Speed < 0.0);
+    digitalWrite(MOTOR2_DIR_PIN, motor2Speed > 0.0);
+    digitalWrite(MOTOR3_DIR_PIN, motor3Speed > 0.0);
+    digitalWrite(MOTOR4_DIR_PIN, motor4Speed < 0.0);
   } else {
     motor1pwm->setPWM(MOTOR1_PWM_PIN, PWM_FREQ, 0);
     motor2pwm->setPWM(MOTOR2_PWM_PIN, PWM_FREQ, 0);
