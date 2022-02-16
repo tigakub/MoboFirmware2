@@ -1,4 +1,4 @@
-#define VERSION "4.2.004b"
+#define VERSION "4.2.005b"
 
 #define DEBUG false
 #define LED_PIN 25
@@ -282,14 +282,97 @@ bool sendMsg()
   return result;
 }
 
+#define INDEPENDENT_WHEEL_HEADING false
 #define USE_IMU_FOR_ORIENTATION false
 
 void handleIncoming()
 {
   switch(incoming.msgId) {
     case TELEM:
+      digitalWrite(LED_PIN, 1);
+      watchdog.feed();
+      delay(5);
+      digitalWrite(LED_PIN, 0);
+      Telem &t = incoming.payload.telem;
+
       remoteHeading = incoming.payload.telem.heading;
+
+      #if INDEPENDENT_WHEEL_HEADING
+      /*
+      #if USE_IMU_FOR_ORIENTATION
+      float normalizedLocalHeading = static_cast<float>(imuEvent.orientation.x) / 359.0;
+      float normalizedRemoteHeading = static_cast<float>((remoteHeading + 540) % 360) / 359.0;
+      if(normalizedLocalHeading > 0.5) normalizedLocalHeading = 0.5 - normalizedLocalHeading;
+      if(normalizedRemoteHeading > 0.5) normalizedRemoteHeading = 0.5 - normalizedRemoteHeading;
+      float headingDifferential = normalizedLocalHeading - normalizedRemoteHeading;
+      #endif
+      */
       
+      // Adding dead zones for left joystick
+      float ljx = 0.0;
+      if(t.ljx < 500) ljx = (static_cast<float>(t.ljx) - 500.0) / 500.0;
+      if(t.ljx > 523) ljx = (static_cast<float>(t.ljx) - 523.0) / 500.0;
+      float ljy = 0.0;
+      if(t.ljy < 500) ljy = (static_cast<float>(t.ljy) - 500.0) / 500.0;
+      if(t.ljy > 523) ljy = (static_cast<float>(t.ljy) - 523.0) / 500.0;
+
+      // Parabolic response obviates need for dead zone on the right stick
+      float rjx = 2.0 * static_cast<float>(t.rjx) / 1023.0 - 1.0; rjx *= fabs(rjx);
+
+      // Overall magnitude derived from contributions from both left and right sticks
+      float magnitude = sqrt(ljx*ljx + ljy*ljy) + fabs(rjx);
+      // Clamped to 1.0
+      if(magnitude > 1.0) magnitude = 1.0;
+
+      // Velocity vector for rotation component per wheel
+      float xs45 = rjx * sin(0.25 * PI);
+      float xc45 = rjx * cos(0.25 * PI); // Equivalent for square robots where the tangent to rotation is at 45º
+      float fr_vel[2]; fr_vel[0] = xs45; fr_vel[1] = -xc45;
+      float fl_vel[2]; fl_vel[0] = xs45; fl_vel[1] = xc45;
+      float bl_vel[2]; bl_vel[0] = -xs45; bl_vel[1] = xc45;
+      float br_vel[2]; br_vel[0] = -xs45; br_vel[1] = -xc45;
+
+      /*
+       *         fl_vel
+       *          /
+       *         |-*******-|
+       *  bl_vel   *     *  \
+       *        \  *     *  fr_vel
+       *         |-*******-|
+       *                 /
+       *              br_vel
+       */
+
+      // Adding linear heading vector component
+      fr_vel[0] += ljx; fr_vel[1] += ljy;
+      fl_vel[0] += ljx; fl_vel[1] += ljy;
+      bl_vel[0] += ljx; bl_vel[1] += ljy;
+      br_vel[0] += ljx; br_vel[1] += ljy;
+
+      // But this could potentially result in heading vectors of magnitude 2.0, so must normalize by dividing by 2
+      fr_vel[0] *= 0.5; fr_vel[1] *= 0.5;
+      fl_vel[0] *= 0.5; fl_vel[1] *= 0.5;
+      bl_vel[0] *= 0.5; bl_vel[1] *= 0.5;
+      br_vel[0] *= 0.5; br_vel[1] *= 0.5;
+
+      // Derive heading angles per wheel
+      float fr_heading = -atan2(fr_vel[0], fr_vel[1]);
+      float fl_heading = -atan2(fl_vel[0], fl_vel[1]);
+      float bl_heading = -atan2(bl_vel[0], bl_vel[1]);
+      float br_heading = -atan2(br_vel[0], br_vel[1]);
+
+      // Derive rotation speed per wheel
+      float fr_speed = cos(fr_heading + 0.25 * PI) * magnitude;
+      float fl_speed = cos(fl_heading - 0.25 * PI) * magnitude;
+      float bl_speed = cos(bl_heading - 0.25 * PI) * magnitude;
+      float br_speed = cos(br_heading + 0.25 * PI) * magnitude;
+
+      motor1Speed = 100.0 * fr_speed;
+      motor2Speed = 100.0 * fl_speed;
+      motor3Speed = 100.0 * br_speed;
+      motor4Speed = 100.0 * bl_speed;
+
+      #else
       #if USE_IMU_FOR_ORIENTATION
       float normalizedLocalHeading = static_cast<float>(imuEvent.orientation.x) / 359.0;
       float normalizedRemoteHeading = static_cast<float>((remoteHeading + 540) % 360) / 359.0;
@@ -298,12 +381,6 @@ void handleIncoming()
       float headingDifferential = normalizedLocalHeading - normalizedRemoteHeading;
       #endif
       
-      digitalWrite(LED_PIN, 1);
-      watchdog.feed();
-      delay(5);
-      digitalWrite(LED_PIN, 0);
-      Telem &t = incoming.payload.telem;
-
       // Dead zones for joysticks
       float front_ljx = 0.0;
       if(t.ljx < 500) front_ljx = (static_cast<float>(t.ljx) - 500.0) / 500.0;
@@ -368,6 +445,7 @@ void handleIncoming()
       motor2Speed = 100.0 * frontRSpeed;
       motor3Speed = 100.0 * rearRSpeed;
       motor4Speed = 100.0 * rearLSpeed;
+      #endif
       
       keepAliveTime = millis();
       break;
