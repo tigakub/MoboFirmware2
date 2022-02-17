@@ -1,6 +1,6 @@
-#define VERSION "4.2.001b"
+#define VERSION "4.3.001b"
 
-#define DEBUG false
+#define DEBUG falses
 #define LED_PIN 17
 
 //* RF ****************************************************************************************************************
@@ -25,6 +25,11 @@ typedef struct Telem {
 
 typedef struct Ping {
   uint32_t pingCount;
+  int32_t heading;
+  float wheel1RPM;
+  float wheel2RPM;
+  float wheel3RPM;
+  float wheel4RPM;
 } Ping;
 
 typedef struct Msg {
@@ -210,6 +215,12 @@ void handleIncoming()
       uint32_t pc = incoming.payload.ping.pingCount;
       #if DEBUG
       Serial.println("Received ping " + String(pc));
+      Serial.println("wheelRPMs: "
+        + String(incoming.payload.ping.wheel1RPM) + ", "
+        + String(incoming.payload.ping.wheel2RPM) + ", "
+        + String(incoming.payload.ping.wheel3RPM) + ", "
+        + String(incoming.payload.ping.wheel4RPM));
+        
       #endif
       break;
   }

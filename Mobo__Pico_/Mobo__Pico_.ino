@@ -1,4 +1,4 @@
-#define VERSION "4.2.005b"
+#define VERSION "4.3.001b"
 
 #define DEBUG false
 #define LED_PIN 25
@@ -26,6 +26,10 @@ typedef struct Telem {
 typedef struct Ping {
   uint32_t pingCount;
   int32_t heading;
+  float wheel1RPM;
+  float wheel2RPM;
+  float wheel3RPM;
+  float wheel4RPM;
 } Ping;
 
 typedef struct Msg {
@@ -40,7 +44,7 @@ Msg incoming, outgoing;
 #define MSG_THROTTLE_PERIOD 1000
 unsigned long msgThrottleTime;
 
-#define PING_PERIOD 500
+#define PING_PERIOD 250
 unsigned long pingThrottleTime;
 uint32_t pingCount = 0;
 
@@ -80,6 +84,19 @@ float motor1Speed = 0.0;
 float motor2Speed = 0.0;
 float motor3Speed = 0.0;
 float motor4Speed = 0.0;
+
+// Gear ratio 50:1
+// Motor poles: 4
+// Seconds per minute 60
+// Pulses per revolution 3 * motor poles = 12
+// Pulse to rpm factor = 60 / pulses per revolution / motor poles / gear ratio = 0.1
+#define PULSE_TO_RPM_FACTOR 0.1
+#define WHEEL_RADIUS 0.076
+
+float wheel1RPM = 0.0;
+float wheel2RPM = 0.0;
+float wheel3RPM = 0.0;
+float wheel4RPM = 0.0;
 
 int breakState = HIGH;
 
@@ -172,15 +189,15 @@ void motorSetup() {
 
   pinMode(MOTOR_BRK_PIN, OUTPUT);
 
-  pinMode(MOTOR1_ENC_PIN, INPUT);
-  pinMode(MOTOR2_ENC_PIN, INPUT);
-  pinMode(MOTOR3_ENC_PIN, INPUT);
-  pinMode(MOTOR4_ENC_PIN, INPUT);
+  pinMode(MOTOR1_ENC_PIN, INPUT_PULLUP);
+  pinMode(MOTOR2_ENC_PIN, INPUT_PULLUP);
+  pinMode(MOTOR3_ENC_PIN, INPUT_PULLUP);
+  pinMode(MOTOR4_ENC_PIN, INPUT_PULLUP);
   
-  pinMode(MOTOR1_ALM_PIN, INPUT);
-  pinMode(MOTOR2_ALM_PIN, INPUT);
-  pinMode(MOTOR3_ALM_PIN, INPUT);
-  pinMode(MOTOR4_ALM_PIN, INPUT);
+  pinMode(MOTOR1_ALM_PIN, INPUT_PULLUP);
+  pinMode(MOTOR2_ALM_PIN, INPUT_PULLUP);
+  pinMode(MOTOR3_ALM_PIN, INPUT_PULLUP);
+  pinMode(MOTOR4_ALM_PIN, INPUT_PULLUP);
 }
 
 //* IMU SETUP ********************************
@@ -223,6 +240,71 @@ void neopixelSetup() {
   neoPixelPulseTimer = millis();
 }
 
+//* MULTICORE SETUP ********************************
+#include <multicore.h>
+
+uint32_t motor1PulseCount = 0;
+uint32_t motor2PulseCount = 0;
+uint32_t motor3PulseCount = 0;
+uint32_t motor4PulseCount = 0;
+
+// Forward declarations
+void core1_setup();
+void core1_loop();
+
+uint32_t intercoreSignal;
+
+void core1_init() {
+  core1_setup();
+
+  // Signal the first core that the second process has started
+  multicore_fifo_push_blocking(0);
+  
+  // Retrieve the initial value from the first core
+  intercoreSignal = multicore_fifo_pop_blocking();
+  
+  // Set up inter core synchronization
+  multicore_lockout_victim_init();
+
+  // Tight loop
+  // It may be the Arduino tool chain is extra temperamental,
+  // but the Pico seems to ignore any code in this loop unless
+  // the code includes a function call. Perhaps it's some kind
+  // of weird attempt at optimization?!? In other words, the
+  // following did not work for me:
+  /*
+    while(1) counter++;
+  */
+  while(1) core1_loop();
+}
+
+void motor1EncoderIRQ() {
+  motor1PulseCount++;
+}
+
+void motor2EncoderIRQ() {
+  motor2PulseCount++;
+}
+
+void motor3EncoderIRQ() {
+  motor3PulseCount++;
+}
+
+void motor4EncoderIRQ() {
+  motor4PulseCount++;
+}
+
+unsigned long rpmSampleTime;
+
+void multicoreSetup() {
+  multicore_launch_core1(core1_init);
+
+  multicore_fifo_pop_blocking();
+  multicore_fifo_push_blocking(1);
+  
+  rpmSampleTime = millis();
+}
+
 //* WATCHDOG SETUP ********************************
 void watchdogSetup() {
   watchdog.stop();
@@ -253,6 +335,7 @@ void setup() {
   motorSetup();
   imuSetup();
   neopixelSetup();
+  multicoreSetup();
   watchdogSetup();
 }
 
@@ -452,6 +535,37 @@ void handleIncoming()
   }
 }
 
+void calcRPM()
+{
+  float elapsed = static_cast<float>(currentTime - rpmSampleTime);
+
+  float m1PulseCount, m2PulseCount, m3PulseCount, m4PulseCount;
+  
+  multicore_lockout_start_blocking();
+  m1PulseCount = static_cast<float>(motor1PulseCount);
+  m2PulseCount = static_cast<float>(motor2PulseCount);
+  m3PulseCount = static_cast<float>(motor3PulseCount);
+  m4PulseCount = static_cast<float>(motor4PulseCount);
+  motor1PulseCount = 0;
+  motor2PulseCount = 0;
+  motor3PulseCount = 0;
+  motor4PulseCount = 0;
+  multicore_lockout_end_blocking();
+
+  float countToHz = 1000.0 / elapsed;
+  float m1PulseFreq = countToHz * m1PulseCount;
+  float m2PulseFreq = countToHz * m2PulseCount;
+  float m3PulseFreq = countToHz * m3PulseCount;
+  float m4PulseFreq = countToHz * m4PulseCount;
+
+  wheel1RPM = m1PulseFreq * PULSE_TO_RPM_FACTOR * ((motor1Speed < 0.0) ? 1.0 : -1.0);
+  wheel2RPM = m2PulseFreq * PULSE_TO_RPM_FACTOR * ((motor2Speed > 0.0) ? 1.0 : -1.0);
+  wheel3RPM = m3PulseFreq * PULSE_TO_RPM_FACTOR * ((motor3Speed > 0.0) ? 1.0 : -1.0);
+  wheel4RPM = m4PulseFreq * PULSE_TO_RPM_FACTOR * ((motor4Speed < 0.0) ? 1.0 : -1.0);
+  
+  rpmSampleTime = currentTime;
+}
+
 void rfLoop() {
   if(radio.available()) {
     radio.read(static_cast<void *>(&incoming), sizeof(Msg));
@@ -463,9 +577,14 @@ void rfLoop() {
   }
 
   if((currentTime - pingThrottleTime) > PING_PERIOD) {
+    calcRPM();
     outgoing.msgId = PING;
     outgoing.payload.ping.pingCount = pingCount;
     outgoing.payload.ping.heading = imuEvent.orientation.x;
+    outgoing.payload.ping.wheel1RPM = wheel1RPM;
+    outgoing.payload.ping.wheel2RPM = wheel2RPM;
+    outgoing.payload.ping.wheel3RPM = wheel3RPM;
+    outgoing.payload.ping.wheel4RPM = wheel4RPM;    
     pingCount++;
     if(!sendMsg()) {
       #if DEBUG
@@ -544,4 +663,14 @@ void loop() {
   rfLoop();
   neopixelLoop();
   motorLoop();
+}
+
+void core1_setup() {
+  attachInterrupt(digitalPinToInterrupt(MOTOR1_ENC_PIN), motor1EncoderIRQ, FALLING);
+  attachInterrupt(digitalPinToInterrupt(MOTOR2_ENC_PIN), motor2EncoderIRQ, FALLING);
+  attachInterrupt(digitalPinToInterrupt(MOTOR3_ENC_PIN), motor3EncoderIRQ, FALLING);
+  attachInterrupt(digitalPinToInterrupt(MOTOR4_ENC_PIN), motor4EncoderIRQ, FALLING);
+}
+
+void core1_loop() {
 }
