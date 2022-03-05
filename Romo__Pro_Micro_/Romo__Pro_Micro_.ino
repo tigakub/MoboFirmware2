@@ -1,6 +1,6 @@
-#define VERSION "4.3.001b"
+#define VERSION "4.4.001b"
 
-#define DEBUG falses
+#define DEBUG true
 #define LED_PIN 17
 
 //* RF ****************************************************************************************************************
@@ -26,10 +26,10 @@ typedef struct Telem {
 typedef struct Ping {
   uint32_t pingCount;
   int32_t heading;
-  float wheel1RPM;
-  float wheel2RPM;
-  float wheel3RPM;
-  float wheel4RPM;
+  float frontLeftRPM;
+  float frontRightRPM;
+  float backLeftRPM;
+  float backRight4RPM;
 } Ping;
 
 typedef struct Msg {
@@ -216,10 +216,10 @@ void handleIncoming()
       #if DEBUG
       Serial.println("Received ping " + String(pc));
       Serial.println("wheelRPMs: "
-        + String(incoming.payload.ping.wheel1RPM) + ", "
-        + String(incoming.payload.ping.wheel2RPM) + ", "
-        + String(incoming.payload.ping.wheel3RPM) + ", "
-        + String(incoming.payload.ping.wheel4RPM));
+        + String(incoming.payload.ping.frontLeftRPM) + ", "
+        + String(incoming.payload.ping.frontRightRPM) + ", "
+        + String(incoming.payload.ping.backLectRPM) + ", "
+        + String(incoming.payload.ping.backRightRPM));
         
       #endif
       break;
@@ -234,10 +234,11 @@ void rfLoop() {
 
   if((currentTime - msgThrottleTime) > MSG_THROTTLE_PERIOD) {
     outgoing.msgId = TELEM;
-    outgoing.payload.telem.ljx = analogRead(A0);
-    outgoing.payload.telem.ljy = analogRead(A1);
-    outgoing.payload.telem.rjx = analogRead(A2);
-    outgoing.payload.telem.rjy = analogRead(A3);
+    // Joysticks are physically flipped for space
+    outgoing.payload.telem.ljx = 1023 - analogRead(A0);
+    outgoing.payload.telem.ljy = 1023 - analogRead(A1);
+    outgoing.payload.telem.rjx = 1023 - analogRead(A2);
+    outgoing.payload.telem.rjy = 1023 - analogRead(A3);
     outgoing.payload.telem.heading = imuEvent.orientation.x;
     if(!sendMsg()) {
       #if DEBUG
