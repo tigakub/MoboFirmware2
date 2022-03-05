@@ -1,4 +1,4 @@
-#define VERSION "4.4.001b"
+#define VERSION "4.4.003b"
 
 #define DEBUG false
 #define LED_PIN 25
@@ -91,7 +91,24 @@ float backRightSpeed = 0.0;
 // Pulses per revolution 3 * motor poles = 12
 // Pulse to rpm factor = 60 / pulses per revolution / motor poles / gear ratio = 0.1
 #define PULSE_TO_RPM_FACTOR 0.1
-#define WHEEL_RADIUS 0.076
+#define WHEEL_BASE_LENGTH 0.1905
+#define WHEEL_BASE_WIDTH 0.1905
+#define WHEEL_RADIUS 0.0635
+
+// 2 PI * WHEEL_RADIUS * MAX_RPM / 60.0 (meters per second)
+#define MAX_SPEED 0.4654793115
+
+// 0.5 PI radians per second
+#define MAX_ANGULAR_SPEED 1.5707963268
+
+// 2 PI * 70.0 / 60.0 Radians per second
+#define MAX_WHEEL_SPEED 7.3303828584
+
+// Reciprocal of WHEEL_RADIUS
+#define LINEAR_FACTOR 15.7480314961
+
+// 0.5 WHEEL_BASE_LENGTH + 0.5 WHEEL_BASE_WIDTH
+#define ANGULAR_FACTOR 0.1905
 
 float frontLeftRPM = 0.0;
 float frontRightRPM = 0.0;
@@ -380,90 +397,47 @@ void handleIncoming()
 
       remoteHeading = incoming.payload.telem.heading;
 
-      #if INDEPENDENT_WHEEL_HEADING
-      /*
-      #if USE_IMU_FOR_ORIENTATION
-      float normalizedLocalHeading = static_cast<float>(imuEvent.orientation.x) / 359.0;
-      float normalizedRemoteHeading = static_cast<float>((remoteHeading + 540) % 360) / 359.0;
-      if(normalizedLocalHeading > 0.5) normalizedLocalHeading = 0.5 - normalizedLocalHeading;
-      if(normalizedRemoteHeading > 0.5) normalizedRemoteHeading = 0.5 - normalizedRemoteHeading;
-      float headingDifferential = normalizedLocalHeading - normalizedRemoteHeading;
-      #endif
-      */
-      
-      // Adding dead zones for left joystick
+      #if 1
       float ljx = 0.0;
       if(t.ljx < 500) ljx = (static_cast<float>(t.ljx) - 500.0) / 500.0;
       if(t.ljx > 523) ljx = (static_cast<float>(t.ljx) - 523.0) / 500.0;
       float ljy = 0.0;
+      
       if(t.ljy < 500) ljy = (static_cast<float>(t.ljy) - 500.0) / 500.0;
       if(t.ljy > 523) ljy = (static_cast<float>(t.ljy) - 523.0) / 500.0;
-
-      // Parabolic response obviates need for dead zone on the right stick
-      float rjx = 2.0 * static_cast<float>(t.rjx) / 1023.0 - 1.0; rjx *= fabs(rjx);
-
-      // Overall magnitude derived from contributions from both left and right sticks
-      float magnitude = sqrt(ljx*ljx + ljy*ljy) + fabs(rjx);
-      // Clamped to 1.0
-      if(magnitude > 1.0) magnitude = 1.0;
-
-      // Velocity vector for rotation component per wheel
-      float xs45 = rjx * sin(0.25 * PI);
-      float xc45 = rjx * cos(0.25 * PI); // Equivalent for square robots where the tangent to rotation is at 45º
-      float fr_vel[2]; fr_vel[0] = xs45; fr_vel[1] = -xc45;
-      float fl_vel[2]; fl_vel[0] = xs45; fl_vel[1] = xc45;
-      float bl_vel[2]; bl_vel[0] = -xs45; bl_vel[1] = xc45;
-      float br_vel[2]; br_vel[0] = -xs45; br_vel[1] = -xc45;
-
-      /*
-       *         fl_vel
-       *          /
-       *         |-*******-|
-       *  bl_vel   *     *  \
-       *        \  *     *  fr_vel
-       *         |-*******-|
-       *                 /
-       *              br_vel
-       */
-
-      // Adding linear heading vector component
-      fl_vel[0] += ljx; fl_vel[1] += ljy;
-      fr_vel[0] += ljx; fr_vel[1] += ljy;
-      bl_vel[0] += ljx; bl_vel[1] += ljy;
-      br_vel[0] += ljx; br_vel[1] += ljy;
-
-      // But this could potentially result in heading vectors of magnitude 2.0, so must normalize by dividing by 2
-      fl_vel[0] *= 0.5; fl_vel[1] *= 0.5;
-      fr_vel[0] *= 0.5; fr_vel[1] *= 0.5;
-      bl_vel[0] *= 0.5; bl_vel[1] *= 0.5;
-      br_vel[0] *= 0.5; br_vel[1] *= 0.5;
-
-      // Derive heading angles per wheel
-      float fl_heading = -atan2(fl_vel[0], fl_vel[1]);
-      float fr_heading = -atan2(fr_vel[0], fr_vel[1]);
-      float bl_heading = -atan2(bl_vel[0], bl_vel[1]);
-      float br_heading = -atan2(br_vel[0], br_vel[1]);
-
-      // Derive rotation speed per wheel
-      float fl_speed = cos(fl_heading - 0.25 * PI) * magnitude;
-      float fr_speed = cos(fr_heading + 0.25 * PI) * magnitude;
-      float bl_speed = cos(bl_heading - 0.25 * PI) * magnitude;
-      float br_speed = cos(br_heading + 0.25 * PI) * magnitude;
-
-      frontLeftSpeed = 100.0 * fl_speed;
-      frontRightSpeed = 100.0 * fr_speed;
-      backLeftSpeed = 100.0 * br_speed;
-      backRightSpeed = 100.0 * bl_speed;
-
-      #else
-      #if USE_IMU_FOR_ORIENTATION
-      float normalizedLocalHeading = static_cast<float>(imuEvent.orientation.x) / 359.0;
-      float normalizedRemoteHeading = static_cast<float>((remoteHeading + 540) % 360) / 359.0;
-      if(normalizedLocalHeading > 0.5) normalizedLocalHeading = 0.5 - normalizedLocalHeading;
-      if(normalizedRemoteHeading > 0.5) normalizedRemoteHeading = 0.5 - normalizedRemoteHeading;
-      float headingDifferential = normalizedLocalHeading - normalizedRemoteHeading;
-      #endif
       
+      float rjx = 2.0 * static_cast<float>(t.rjx) / 1023.0 - 1.0; rjx *= fabs(rjx);
+      
+      float forward = LINEAR_FACTOR * ljy * MAX_SPEED;
+      float lateral = LINEAR_FACTOR * ljx * MAX_SPEED;
+      float angular = LINEAR_FACTOR * ANGULAR_FACTOR * rjx * MAX_ANGULAR_SPEED;
+
+      float flRadiansPerSec = forward - lateral - angular;
+      float frRadiansPerSec = forward + lateral + angular;
+      float blRadiansPerSec = forward + lateral - angular;
+      float brRadiansPerSec = forward - lateral + angular;
+
+      float maxRadiansPerSec = fabs(flRadiansPerSec);
+      if(fabs(frRadiansPerSec) > maxRadiansPerSec) maxRadiansPerSec = fabs(frRadiansPerSec);
+      if(fabs(blRadiansPerSec) > maxRadiansPerSec) maxRadiansPerSec = fabs(blRadiansPerSec);
+      if(fabs(brRadiansPerSec) > maxRadiansPerSec) maxRadiansPerSec = fabs(brRadiansPerSec);
+
+      if(maxRadiansPerSec > MAX_WHEEL_SPEED) {
+        float normalizer = MAX_WHEEL_SPEED / maxRadiansPerSec;
+        flRadiansPerSec *= normalizer;
+        frRadiansPerSec *= normalizer;
+        blRadiansPerSec *= normalizer;
+        brRadiansPerSec *= normalizer;
+      }
+
+      float toDutyCycle = 100.0 / MAX_WHEEL_SPEED;
+      
+      frontLeftSpeed = flRadiansPerSec * toDutyCycle;
+      frontRightSpeed = frRadiansPerSec * toDutyCycle;
+      backLeftSpeed = blRadiansPerSec * toDutyCycle;
+      backRightSpeed = brRadiansPerSec * toDutyCycle;
+      
+      #else
       // Dead zones for joysticks
       float front_ljx = 0.0;
       if(t.ljx < 500) front_ljx = (static_cast<float>(t.ljx) - 500.0) / 500.0;
@@ -475,17 +449,8 @@ void handleIncoming()
       if(t.ljy > 523) front_ljy = (static_cast<float>(t.ljy) - 523.0) / 500.0;
       float back_ljy = front_ljy;
 
-      #if USE_IMU_FOR_ORIENTATION
-      float rjx = 100.0 * headingDifferential * fabs(headingDifferential);
-      #else
       // Parabolic response obviates need for dead zone on the right stick
-      /*
-      float rjx = 0.0;
-      if(t.rjx < 500) rjx = -pow((static_cast<float>(t.rjx) - 500.0) / 500.0, 2.0);
-      if(t.rjx > 523) rjx = pow((static_cast<float>(t.rjx) - 523.0) / 500.0, 2.0);
-      */
       float rjx = 2.0 * static_cast<float>(t.rjx) / 1023.0 - 1.0; rjx *= fabs(rjx);
-      #endif
       float rjy = 0.0;
       
       front_ljx += rjx;
@@ -607,8 +572,8 @@ void motorLoop() {
     
     digitalWrite(FL_DIR_PIN, frontLeftSpeed < 0.0);
     digitalWrite(FR_DIR_PIN, frontRightSpeed > 0.0);
-    digitalWrite(BL_DIR_PIN, backLeftSpeed > 0.0);
-    digitalWrite(BR_DIR_PIN, backRightSpeed < 0.0);
+    digitalWrite(BL_DIR_PIN, backLeftSpeed < 0.0);
+    digitalWrite(BR_DIR_PIN, backRightSpeed > 0.0);
   } else {
     frontLeftPWM->setPWM(FL_PWM_PIN, PWM_FREQ, 0);
     frontRightPWM->setPWM(FR_PWM_PIN, PWM_FREQ, 0);
