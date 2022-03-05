@@ -1,6 +1,6 @@
 #define VERSION "4.3.001b"
 
-#define DEBUG falses
+#define DEBUG false
 #define LED_PIN 17
 
 //* RF ****************************************************************************************************************
@@ -234,10 +234,10 @@ void rfLoop() {
 
   if((currentTime - msgThrottleTime) > MSG_THROTTLE_PERIOD) {
     outgoing.msgId = TELEM;
-    outgoing.payload.telem.ljx = analogRead(A0);
-    outgoing.payload.telem.ljy = analogRead(A1);
-    outgoing.payload.telem.rjx = analogRead(A2);
-    outgoing.payload.telem.rjy = analogRead(A3);
+    outgoing.payload.telem.ljx = 1023 - analogRead(A0);
+    outgoing.payload.telem.ljy = 1023 - analogRead(A1);
+    outgoing.payload.telem.rjx = 1023 - analogRead(A2);
+    outgoing.payload.telem.rjy = 1023 - analogRead(A3);
     outgoing.payload.telem.heading = imuEvent.orientation.x;
     if(!sendMsg()) {
       #if DEBUG
