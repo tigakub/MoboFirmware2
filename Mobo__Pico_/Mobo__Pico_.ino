@@ -1,4 +1,4 @@
-#define VERSION "4.4.001b"
+#define VERSION "4.4.003b"
 
 #define DEBUG false
 #define LED_PIN 25
@@ -112,37 +112,37 @@ float backRightRPM = 0.0;
 /*
 #define PWM_FREQ 2000
 
-#define MOTOR1_DIR_PIN 8
-#define MOTOR1_PWM_PIN 9
-#define MOTOR1_ENC_PIN 10
-#define MOTOR1_ALM_PIN 11
+#define FR_DIR_PIN 8
+#define FR_PWM_PIN 9
+#define FR_ENC_PIN 10
+#define FR_ALM_PIN 11
 
-#define MOTOR2_DIR_PIN 12
-#define MOTOR2_PWM_PIN 13
-#define MOTOR2_ENC_PIN 14
-#define MOTOR2_ALM_PIN 15
+#define FL_DIR_PIN 12
+#define FL_PWM_PIN 13
+#define FL_ENC_PIN 14
+#define FL_ALM_PIN 15
 
-#define MOTOR3_DIR_PIN 16
-#define MOTOR3_PWM_PIN 17
-#define MOTOR3_ENC_PIN 18
-#define MOTOR3_ALM_PIN 19
+#define BL_DIR_PIN 16
+#define BL_PWM_PIN 17
+#define BL_ENC_PIN 18
+#define BL_ALM_PIN 19
 
-#define MOTOR4_DIR_PIN 20
-#define MOTOR4_PWM_PIN 21
-#define MOTOR4_ENC_PIN 22
-#define MOTOR4_ALM_PIN 26
+#define BR_DIR_PIN 20
+#define BR_PWM_PIN 21
+#define BR_ENC_PIN 22
+#define BR_ALM_PIN 26
 
 #define MOTOR_BRK_PIN 27
 
-RP2040_PWM *motor1pwm = new RP2040_PWM(MOTOR1_PWM_PIN, PWM_FREQ, 0, false);
-RP2040_PWM *motor2pwm = new RP2040_PWM(MOTOR2_PWM_PIN, PWM_FREQ, 0, false);
-RP2040_PWM *motor3pwm = new RP2040_PWM(MOTOR3_PWM_PIN, PWM_FREQ, 0, false);
-RP2040_PWM *motor4pwm = new RP2040_PWM(MOTOR4_PWM_PIN, PWM_FREQ, 0, false);
+RP2040_PWM *frontLeftPWM = new RP2040_PWM(FL_PWM_PIN, PWM_FREQ, 0, false);
+RP2040_PWM *frontRightPWM = new RP2040_PWM(FR_PWM_PIN, PWM_FREQ, 0, false);
+RP2040_PWM *backLeftPWM = new RP2040_PWM(BL_PWM_PIN, PWM_FREQ, 0, false);
+RP2040_PWM *backRightPWM = new RP2040_PWM(BR_PWM_PIN, PWM_FREQ, 0, false);
 
-float motor1Speed = 0.0;
-float motor2Speed = 0.0;
-float motor3Speed = 0.0;
-float motor4Speed = 0.0;
+float frontLeftSpeed = 0.0;
+float frontRightSpeed = 0.0;
+float backLeftSpeed = 0.0;
+float backRightSpeed = 0.0;
 
 // Gear ratio 50:1
 // Motor poles: 4
@@ -150,17 +150,34 @@ float motor4Speed = 0.0;
 // Pulses per revolution 3 * motor poles = 12
 // Pulse to rpm factor = 60 / pulses per revolution / motor poles / gear ratio = 0.1
 #define PULSE_TO_RPM_FACTOR 0.1
-#define WHEEL_RADIUS 0.076
+#define WHEEL_BASE_LENGTH 0.1905
+#define WHEEL_BASE_WIDTH 0.1905
+#define WHEEL_RADIUS 0.0635
 
-float wheel1RPM = 0.0;
-float wheel2RPM = 0.0;
-float wheel3RPM = 0.0;
-float wheel4RPM = 0.0;
+// 2 PI * WHEEL_RADIUS * MAX_RPM / 60.0 (meters per second)
+#define MAX_SPEED 0.4654793115
+
+// 0.5 PI radians per second
+#define MAX_ANGULAR_SPEED 1.5707963268
+
+// 2 PI * 70.0 / 60.0 Radians per second
+#define MAX_WHEEL_SPEED 7.3303828584
+
+// Reciprocal of WHEEL_RADIUS
+#define LINEAR_FACTOR 15.7480314961
+
+// 0.5 WHEEL_BASE_LENGTH + 0.5 WHEEL_BASE_WIDTH
+#define ANGULAR_FACTOR 0.1905
+
+float frontLeftRPM = 0.0;
+float frontRightRPM = 0.0;
+float backLeftRPM = 0.0;
+float backRightRPM = 0.0;
 
 int breakState = HIGH;
 
 float frontVel[2];
-float rearVel[2];
+float backVel[2];
 */
 
 //* IMU ****************************************************************************************************************
@@ -245,29 +262,22 @@ void rfSetup() {
 #include "PicoPWM.hpp"
 
 void motorSetup() {
-  Wheel::initStatics(
-      BRK_PIN,
-      MAX_DUTY_CYCLE,
-      MAX_RPM,
-      PULSE_TO_RPM
-  );
-
-  Wheel::releaseBreak();
-
-  mec.start(33);
-  /*
-  pinMode(MOTOR1_DIR_PIN, OUTPUT);
-  pinMode(MOTOR2_DIR_PIN, OUTPUT);
-  pinMode(MOTOR3_DIR_PIN, OUTPUT);
-  pinMode(MOTOR4_DIR_PIN, OUTPUT);
+  pinMode(FL_DIR_PIN, OUTPUT);
+  pinMode(FR_DIR_PIN, OUTPUT);
+  pinMode(BL_DIR_PIN, OUTPUT);
+  pinMode(BR_DIR_PIN, OUTPUT);
 
   pinMode(MOTOR_BRK_PIN, OUTPUT);
 
-  pinMode(MOTOR1_ALM_PIN, INPUT_PULLUP);
-  pinMode(MOTOR2_ALM_PIN, INPUT_PULLUP);
-  pinMode(MOTOR3_ALM_PIN, INPUT_PULLUP);
-  pinMode(MOTOR4_ALM_PIN, INPUT_PULLUP);
-  */
+  pinMode(FL_ENC_PIN, INPUT_PULLUP);
+  pinMode(FR_ENC_PIN, INPUT_PULLUP);
+  pinMode(BL_ENC_PIN, INPUT_PULLUP);
+  pinMode(BR_ENC_PIN, INPUT_PULLUP);
+  
+  pinMode(FL_ALM_PIN, INPUT_PULLUP);
+  pinMode(FR_ALM_PIN, INPUT_PULLUP);
+  pinMode(BL_ALM_PIN, INPUT_PULLUP);
+  pinMode(BR_ALM_PIN, INPUT_PULLUP);
 }
 
 //* IMU SETUP ********************************
@@ -450,19 +460,104 @@ void handleIncoming()
 
       remoteHeading = incoming.payload.telem.heading;
 
-      // Dead zones for joysticks
+      #if 1
       float ljx = 0.0;
       if(t.ljx < 500) ljx = (static_cast<float>(t.ljx) - 500.0) / 500.0;
       if(t.ljx > 523) ljx = (static_cast<float>(t.ljx) - 523.0) / 500.0;
 
       float ljy = 0.0;
+      
       if(t.ljy < 500) ljy = (static_cast<float>(t.ljy) - 500.0) / 500.0;
       if(t.ljy > 523) ljy = (static_cast<float>(t.ljy) - 523.0) / 500.0;
+      
+      float rjx = 2.0 * static_cast<float>(t.rjx) / 1023.0 - 1.0; rjx *= fabs(rjx);
+      
+      float forward = LINEAR_FACTOR * ljy * MAX_SPEED;
+      float lateral = LINEAR_FACTOR * ljx * MAX_SPEED;
+      float angular = LINEAR_FACTOR * ANGULAR_FACTOR * rjx * MAX_ANGULAR_SPEED;
+
+      float flRadiansPerSec = forward - lateral - angular;
+      float frRadiansPerSec = forward + lateral + angular;
+      float blRadiansPerSec = forward + lateral - angular;
+      float brRadiansPerSec = forward - lateral + angular;
+
+      float maxRadiansPerSec = fabs(flRadiansPerSec);
+      if(fabs(frRadiansPerSec) > maxRadiansPerSec) maxRadiansPerSec = fabs(frRadiansPerSec);
+      if(fabs(blRadiansPerSec) > maxRadiansPerSec) maxRadiansPerSec = fabs(blRadiansPerSec);
+      if(fabs(brRadiansPerSec) > maxRadiansPerSec) maxRadiansPerSec = fabs(brRadiansPerSec);
+
+      if(maxRadiansPerSec > MAX_WHEEL_SPEED) {
+        float normalizer = MAX_WHEEL_SPEED / maxRadiansPerSec;
+        flRadiansPerSec *= normalizer;
+        frRadiansPerSec *= normalizer;
+        blRadiansPerSec *= normalizer;
+        brRadiansPerSec *= normalizer;
+      }
+
+      float toDutyCycle = 100.0 / MAX_WHEEL_SPEED;
+      
+      frontLeftSpeed = flRadiansPerSec * toDutyCycle;
+      frontRightSpeed = frRadiansPerSec * toDutyCycle;
+      backLeftSpeed = blRadiansPerSec * toDutyCycle;
+      backRightSpeed = brRadiansPerSec * toDutyCycle;
+      
+      #else
+      // Dead zones for joysticks
+      float front_ljx = 0.0;
+      if(t.ljx < 500) front_ljx = (static_cast<float>(t.ljx) - 500.0) / 500.0;
+      if(t.ljx > 523) front_ljx = (static_cast<float>(t.ljx) - 523.0) / 500.0;
+      float back_ljx = front_ljx;
+
+      float front_ljy = 0.0;
+      if(t.ljy < 500) front_ljy = (static_cast<float>(t.ljy) - 500.0) / 500.0;
+      if(t.ljy > 523) front_ljy = (static_cast<float>(t.ljy) - 523.0) / 500.0;
+      float back_ljy = front_ljy;
 
       // Parabolic response obviates need for dead zone on the right stick
       float rjx = 2.0 * static_cast<float>(t.rjx) / 1023.0 - 1.0; rjx *= fabs(rjx);
       float rjy = 0.0;
-      mec.set(ljy * MAX_RPM, ljx * MAX_RPM, rjx * 0.5 * PI);
+      
+      front_ljx += rjx;
+      front_ljy += rjy;
+      
+      back_ljx -= rjx;
+      back_ljy -= rjy;
+      
+      float front_ljm = sqrt(front_ljx * front_ljx + front_ljy * front_ljy);
+      float back_ljm = sqrt(back_ljx * back_ljx + back_ljy * back_ljy);
+
+      front_ljx /= front_ljm;
+      front_ljy /= front_ljm;
+
+      back_ljx /= back_ljm;
+      back_ljy /= back_ljm;
+
+      float frontHeading = atan2(front_ljx, front_ljy); // - headingDifferential;
+      float backHeading = atan2(back_ljx, back_ljy); // - headingDifferential;
+      
+      #if DEBUG
+      Serial.println("(" + String(frontHeading) + ", " + String(backHeading) + ")");
+      #endif
+      
+      float frontLSpeed = cos(-0.25 * PI - frontHeading) * front_ljm;
+      float frontRSpeed = cos(0.25 * PI - frontHeading) * front_ljm;
+      float backLSpeed = cos(-0.25 * PI - backHeading) * back_ljm;
+      float backRSpeed = cos(0.25 * PI - backHeading) * back_ljm;
+
+      if(frontLSpeed > 1.0) frontLSpeed = 1.0;
+      if(frontLSpeed < -1.0) frontLSpeed = -1.0;
+      if(frontRSpeed > 1.0) frontRSpeed = 1.0;
+      if(frontRSpeed < -1.0) frontRSpeed = -1.0;
+      if(backLSpeed > 1.0) backLSpeed = 1.0;
+      if(backLSpeed < -1.0) backLSpeed = -1.0;
+      if(backRSpeed > 1.0) backRSpeed = 1.0;
+      if(backRSpeed < -1.0) backRSpeed = -1.0;
+      
+      frontLeftSpeed = 100.0 * frontLSpeed;
+      frontRightSpeed = 100.0 * frontRSpeed;
+      backLeftSpeed = 100.0 * backLSpeed;
+      backRightSpeed = 100.0 * backRSpeed;
+      #endif
       
       keepAliveTime = millis();
       break;
@@ -492,10 +587,10 @@ void calcRPM()
   float blPulseFreq = countToHz * blPulseCount;
   float brPulseFreq = countToHz * brPulseCount;
 
-  frontLeftRPM = flPulseFreq * PULSE_TO_RPM;
-  frontRightRPM = frPulseFreq * PULSE_TO_RPM;
-  backLeftPWM = blPulseFreq * PULSE_TO_RPM;
-  backRightRPM = brPulseFreq * PULSE_TO_RPM;
+  frontLeftRPM = flPulseFreq * PULSE_TO_RPM_FACTOR * ((frontLeftSpeed < 0.0) ? 1.0 : -1.0);
+  frontRightRPM = frPulseFreq * PULSE_TO_RPM_FACTOR * ((frontRightSpeed > 0.0) ? 1.0 : -1.0);
+  backLeftRPM = blPulseFreq * PULSE_TO_RPM_FACTOR * ((backLeftSpeed > 0.0) ? 1.0 : -1.0);
+  backRightRPM = brPulseFreq * PULSE_TO_RPM_FACTOR * ((backRightSpeed < 0.0) ? 1.0 : -1.0);
   
   rpmSampleTime = currentTime;
 }
@@ -531,27 +626,24 @@ void rfLoop() {
 
 //* MOTOR LOOP ****************************************************
 void motorLoop() {
-  mec.yield(currentTime);
-  /*
   breakState = ((currentTime - keepAliveTime) <= KEEP_ALIVE_PERIOD);
   digitalWrite(MOTOR_BRK_PIN, breakState);
   if(breakState) {
-    motor1pwm->setPWM(MOTOR1_PWM_PIN, PWM_FREQ, abs(motor1Speed));
-    motor2pwm->setPWM(MOTOR2_PWM_PIN, PWM_FREQ, abs(motor2Speed));
-    motor3pwm->setPWM(MOTOR3_PWM_PIN, PWM_FREQ, abs(motor3Speed));
-    motor4pwm->setPWM(MOTOR4_PWM_PIN, PWM_FREQ, abs(motor4Speed));
+    frontLeftPWM->setPWM(FL_PWM_PIN, PWM_FREQ, abs(frontLeftSpeed));
+    frontRightPWM->setPWM(FR_PWM_PIN, PWM_FREQ, abs(frontRightSpeed));
+    backLeftPWM->setPWM(BL_PWM_PIN, PWM_FREQ, abs(backLeftSpeed));
+    backRightPWM->setPWM(BR_PWM_PIN, PWM_FREQ, abs(backRightSpeed));
     
-    digitalWrite(MOTOR1_DIR_PIN, motor1Speed < 0.0);
-    digitalWrite(MOTOR2_DIR_PIN, motor2Speed > 0.0);
-    digitalWrite(MOTOR3_DIR_PIN, motor3Speed > 0.0);
-    digitalWrite(MOTOR4_DIR_PIN, motor4Speed < 0.0);
+    digitalWrite(FL_DIR_PIN, frontLeftSpeed < 0.0);
+    digitalWrite(FR_DIR_PIN, frontRightSpeed > 0.0);
+    digitalWrite(BL_DIR_PIN, backLeftSpeed < 0.0);
+    digitalWrite(BR_DIR_PIN, backRightSpeed > 0.0);
   } else {
-    motor1pwm->setPWM(MOTOR1_PWM_PIN, PWM_FREQ, 0);
-    motor2pwm->setPWM(MOTOR2_PWM_PIN, PWM_FREQ, 0);
-    motor3pwm->setPWM(MOTOR3_PWM_PIN, PWM_FREQ, 0);
-    motor4pwm->setPWM(MOTOR4_PWM_PIN, PWM_FREQ, 0);
+    frontLeftPWM->setPWM(FL_PWM_PIN, PWM_FREQ, 0);
+    frontRightPWM->setPWM(FR_PWM_PIN, PWM_FREQ, 0);
+    backLeftPWM->setPWM(BL_PWM_PIN, PWM_FREQ, 0);
+    backRightPWM->setPWM(BR_PWM_PIN, PWM_FREQ, 0);
   }
-  */
 }
 
 //* NEOPIXEL LOOP ****************************************************
@@ -602,15 +694,10 @@ void loop() {
 }
 
 void core1_setup() {
-  pinMode(FL_ENC_PIN, INPUT_PULLUP);
-  pinMode(FR_ENC_PIN, INPUT_PULLUP);
-  pinMode(BL_ENC_PIN, INPUT_PULLUP);
-  pinMode(BR_ENC_PIN, INPUT_PULLUP);
-  
-  attachInterrupt(digitalPinToInterrupt(FL_ENC_PIN), frontLeftEncoderIRQ, FALLING);
-  attachInterrupt(digitalPinToInterrupt(FR_ENC_PIN), frontRightEncoderIRQ, FALLING);
-  attachInterrupt(digitalPinToInterrupt(BL_ENC_PIN), backLeftEncoderIRQ, FALLING);
-  attachInterrupt(digitalPinToInterrupt(BR_ENC_PIN), backRightEncoderIRQ, FALLING);
+  attachInterrupt(digitalPinToInterrupt(FL_ENC_PIN), frontLeftEncoderIRQ, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(FR_ENC_PIN), frontRightEncoderIRQ, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(BL_ENC_PIN), backLeftEncoderIRQ, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(BR_ENC_PIN), backRightEncoderIRQ, CHANGE);
 }
 
 void core1_loop() {

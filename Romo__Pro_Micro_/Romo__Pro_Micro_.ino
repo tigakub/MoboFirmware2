@@ -1,6 +1,7 @@
-#define VERSION "4.4.001b"
+#define VERSION "4.4.003b"
 
-#define DEBUG true
+#define DEBUG false
+
 #define LED_PIN 17
 
 //* RF ****************************************************************************************************************
@@ -29,7 +30,7 @@ typedef struct Ping {
   float frontLeftRPM;
   float frontRightRPM;
   float backLeftRPM;
-  float backRight4RPM;
+  float backRightRPM;
 } Ping;
 
 typedef struct Msg {
@@ -218,7 +219,7 @@ void handleIncoming()
       Serial.println("wheelRPMs: "
         + String(incoming.payload.ping.frontLeftRPM) + ", "
         + String(incoming.payload.ping.frontRightRPM) + ", "
-        + String(incoming.payload.ping.backLectRPM) + ", "
+        + String(incoming.payload.ping.backLeftRPM) + ", "
         + String(incoming.payload.ping.backRightRPM));
         
       #endif
