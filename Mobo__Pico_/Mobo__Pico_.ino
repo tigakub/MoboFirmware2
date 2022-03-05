@@ -1,4 +1,4 @@
-#define VERSION "4.3.001b"
+#define VERSION "4.4.001b"
 
 #define DEBUG false
 #define LED_PIN 25
@@ -26,10 +26,10 @@ typedef struct Telem {
 typedef struct Ping {
   uint32_t pingCount;
   int32_t heading;
-  float wheel1RPM;
-  float wheel2RPM;
-  float wheel3RPM;
-  float wheel4RPM;
+  float frontLeftRPM;
+  float frontRightRPM;
+  float backLeftRPM;
+  float backRightRPM;
 } Ping;
 
 typedef struct Msg {
@@ -53,37 +53,37 @@ uint32_t pingCount = 0;
 
 #define PWM_FREQ 2000
 
-#define MOTOR1_DIR_PIN 8
-#define MOTOR1_PWM_PIN 9
-#define MOTOR1_ENC_PIN 10
-#define MOTOR1_ALM_PIN 11
+#define FR_DIR_PIN 8
+#define FR_PWM_PIN 9
+#define FR_ENC_PIN 10
+#define FR_ALM_PIN 11
 
-#define MOTOR2_DIR_PIN 12
-#define MOTOR2_PWM_PIN 13
-#define MOTOR2_ENC_PIN 14
-#define MOTOR2_ALM_PIN 15
+#define FL_DIR_PIN 12
+#define FL_PWM_PIN 13
+#define FL_ENC_PIN 14
+#define FL_ALM_PIN 15
 
-#define MOTOR3_DIR_PIN 16
-#define MOTOR3_PWM_PIN 17
-#define MOTOR3_ENC_PIN 18
-#define MOTOR3_ALM_PIN 19
+#define BL_DIR_PIN 16
+#define BL_PWM_PIN 17
+#define BL_ENC_PIN 18
+#define BL_ALM_PIN 19
 
-#define MOTOR4_DIR_PIN 20
-#define MOTOR4_PWM_PIN 21
-#define MOTOR4_ENC_PIN 22
-#define MOTOR4_ALM_PIN 26
+#define BR_DIR_PIN 20
+#define BR_PWM_PIN 21
+#define BR_ENC_PIN 22
+#define BR_ALM_PIN 26
 
 #define MOTOR_BRK_PIN 27
 
-RP2040_PWM *motor1pwm = new RP2040_PWM(MOTOR1_PWM_PIN, PWM_FREQ, 0, false);
-RP2040_PWM *motor2pwm = new RP2040_PWM(MOTOR2_PWM_PIN, PWM_FREQ, 0, false);
-RP2040_PWM *motor3pwm = new RP2040_PWM(MOTOR3_PWM_PIN, PWM_FREQ, 0, false);
-RP2040_PWM *motor4pwm = new RP2040_PWM(MOTOR4_PWM_PIN, PWM_FREQ, 0, false);
+RP2040_PWM *frontLeftPWM = new RP2040_PWM(FL_PWM_PIN, PWM_FREQ, 0, false);
+RP2040_PWM *frontRightPWM = new RP2040_PWM(FR_PWM_PIN, PWM_FREQ, 0, false);
+RP2040_PWM *backLeftPWM = new RP2040_PWM(BL_PWM_PIN, PWM_FREQ, 0, false);
+RP2040_PWM *backRightPWM = new RP2040_PWM(BR_PWM_PIN, PWM_FREQ, 0, false);
 
-float motor1Speed = 0.0;
-float motor2Speed = 0.0;
-float motor3Speed = 0.0;
-float motor4Speed = 0.0;
+float frontLeftSpeed = 0.0;
+float frontRightSpeed = 0.0;
+float backLeftSpeed = 0.0;
+float backRightSpeed = 0.0;
 
 // Gear ratio 50:1
 // Motor poles: 4
@@ -93,15 +93,15 @@ float motor4Speed = 0.0;
 #define PULSE_TO_RPM_FACTOR 0.1
 #define WHEEL_RADIUS 0.076
 
-float wheel1RPM = 0.0;
-float wheel2RPM = 0.0;
-float wheel3RPM = 0.0;
-float wheel4RPM = 0.0;
+float frontLeftRPM = 0.0;
+float frontRightRPM = 0.0;
+float backLeftRPM = 0.0;
+float backRightRPM = 0.0;
 
 int breakState = HIGH;
 
 float frontVel[2];
-float rearVel[2];
+float backVel[2];
 
 //* IMU ****************************************************************************************************************
 #include <Wire.h>
@@ -182,22 +182,22 @@ void rfSetup() {
 
 //* MOTOR SETUP ********************************
 void motorSetup() {
-  pinMode(MOTOR1_DIR_PIN, OUTPUT);
-  pinMode(MOTOR2_DIR_PIN, OUTPUT);
-  pinMode(MOTOR3_DIR_PIN, OUTPUT);
-  pinMode(MOTOR4_DIR_PIN, OUTPUT);
+  pinMode(FL_DIR_PIN, OUTPUT);
+  pinMode(FR_DIR_PIN, OUTPUT);
+  pinMode(BL_DIR_PIN, OUTPUT);
+  pinMode(BR_DIR_PIN, OUTPUT);
 
   pinMode(MOTOR_BRK_PIN, OUTPUT);
 
-  pinMode(MOTOR1_ENC_PIN, INPUT_PULLUP);
-  pinMode(MOTOR2_ENC_PIN, INPUT_PULLUP);
-  pinMode(MOTOR3_ENC_PIN, INPUT_PULLUP);
-  pinMode(MOTOR4_ENC_PIN, INPUT_PULLUP);
+  pinMode(FL_ENC_PIN, INPUT_PULLUP);
+  pinMode(FR_ENC_PIN, INPUT_PULLUP);
+  pinMode(BL_ENC_PIN, INPUT_PULLUP);
+  pinMode(BR_ENC_PIN, INPUT_PULLUP);
   
-  pinMode(MOTOR1_ALM_PIN, INPUT_PULLUP);
-  pinMode(MOTOR2_ALM_PIN, INPUT_PULLUP);
-  pinMode(MOTOR3_ALM_PIN, INPUT_PULLUP);
-  pinMode(MOTOR4_ALM_PIN, INPUT_PULLUP);
+  pinMode(FL_ALM_PIN, INPUT_PULLUP);
+  pinMode(FR_ALM_PIN, INPUT_PULLUP);
+  pinMode(BL_ALM_PIN, INPUT_PULLUP);
+  pinMode(BR_ALM_PIN, INPUT_PULLUP);
 }
 
 //* IMU SETUP ********************************
@@ -243,10 +243,10 @@ void neopixelSetup() {
 //* MULTICORE SETUP ********************************
 #include <multicore.h>
 
-uint32_t motor1PulseCount = 0;
-uint32_t motor2PulseCount = 0;
-uint32_t motor3PulseCount = 0;
-uint32_t motor4PulseCount = 0;
+uint32_t frontLeftPulseCount = 0;
+uint32_t frontRightPulseCount = 0;
+uint32_t backLeftPulseCount = 0;
+uint32_t backRightPulseCount = 0;
 
 // Forward declarations
 void core1_setup();
@@ -278,20 +278,20 @@ void core1_init() {
   while(1) core1_loop();
 }
 
-void motor1EncoderIRQ() {
-  motor1PulseCount++;
+void frontLeftEncoderIRQ() {
+  frontLeftPulseCount++;
 }
 
-void motor2EncoderIRQ() {
-  motor2PulseCount++;
+void frontRightEncoderIRQ() {
+  frontRightPulseCount++;
 }
 
-void motor3EncoderIRQ() {
-  motor3PulseCount++;
+void backLeftEncoderIRQ() {
+  backLeftPulseCount++;
 }
 
-void motor4EncoderIRQ() {
-  motor4PulseCount++;
+void backRightEncoderIRQ() {
+  backRightPulseCount++;
 }
 
 unsigned long rpmSampleTime;
@@ -427,33 +427,33 @@ void handleIncoming()
        */
 
       // Adding linear heading vector component
-      fr_vel[0] += ljx; fr_vel[1] += ljy;
       fl_vel[0] += ljx; fl_vel[1] += ljy;
+      fr_vel[0] += ljx; fr_vel[1] += ljy;
       bl_vel[0] += ljx; bl_vel[1] += ljy;
       br_vel[0] += ljx; br_vel[1] += ljy;
 
       // But this could potentially result in heading vectors of magnitude 2.0, so must normalize by dividing by 2
-      fr_vel[0] *= 0.5; fr_vel[1] *= 0.5;
       fl_vel[0] *= 0.5; fl_vel[1] *= 0.5;
+      fr_vel[0] *= 0.5; fr_vel[1] *= 0.5;
       bl_vel[0] *= 0.5; bl_vel[1] *= 0.5;
       br_vel[0] *= 0.5; br_vel[1] *= 0.5;
 
       // Derive heading angles per wheel
-      float fr_heading = -atan2(fr_vel[0], fr_vel[1]);
       float fl_heading = -atan2(fl_vel[0], fl_vel[1]);
+      float fr_heading = -atan2(fr_vel[0], fr_vel[1]);
       float bl_heading = -atan2(bl_vel[0], bl_vel[1]);
       float br_heading = -atan2(br_vel[0], br_vel[1]);
 
       // Derive rotation speed per wheel
-      float fr_speed = cos(fr_heading + 0.25 * PI) * magnitude;
       float fl_speed = cos(fl_heading - 0.25 * PI) * magnitude;
+      float fr_speed = cos(fr_heading + 0.25 * PI) * magnitude;
       float bl_speed = cos(bl_heading - 0.25 * PI) * magnitude;
       float br_speed = cos(br_heading + 0.25 * PI) * magnitude;
 
-      motor1Speed = 100.0 * fr_speed;
-      motor2Speed = 100.0 * fl_speed;
-      motor3Speed = 100.0 * br_speed;
-      motor4Speed = 100.0 * bl_speed;
+      frontLeftSpeed = 100.0 * fl_speed;
+      frontRightSpeed = 100.0 * fr_speed;
+      backLeftSpeed = 100.0 * br_speed;
+      backRightSpeed = 100.0 * bl_speed;
 
       #else
       #if USE_IMU_FOR_ORIENTATION
@@ -468,12 +468,12 @@ void handleIncoming()
       float front_ljx = 0.0;
       if(t.ljx < 500) front_ljx = (static_cast<float>(t.ljx) - 500.0) / 500.0;
       if(t.ljx > 523) front_ljx = (static_cast<float>(t.ljx) - 523.0) / 500.0;
-      float rear_ljx = front_ljx;
+      float back_ljx = front_ljx;
 
       float front_ljy = 0.0;
       if(t.ljy < 500) front_ljy = (static_cast<float>(t.ljy) - 500.0) / 500.0;
       if(t.ljy > 523) front_ljy = (static_cast<float>(t.ljy) - 523.0) / 500.0;
-      float rear_ljy = front_ljy;
+      float back_ljy = front_ljy;
 
       #if USE_IMU_FOR_ORIENTATION
       float rjx = 100.0 * headingDifferential * fabs(headingDifferential);
@@ -491,43 +491,43 @@ void handleIncoming()
       front_ljx += rjx;
       front_ljy += rjy;
       
-      rear_ljx -= rjx;
-      rear_ljy -= rjy;
+      back_ljx -= rjx;
+      back_ljy -= rjy;
       
       float front_ljm = sqrt(front_ljx * front_ljx + front_ljy * front_ljy);
-      float rear_ljm = sqrt(rear_ljx * rear_ljx + rear_ljy * rear_ljy);
+      float back_ljm = sqrt(back_ljx * back_ljx + back_ljy * back_ljy);
 
       front_ljx /= front_ljm;
       front_ljy /= front_ljm;
 
-      rear_ljx /= rear_ljm;
-      rear_ljy /= rear_ljm;
+      back_ljx /= back_ljm;
+      back_ljy /= back_ljm;
 
       float frontHeading = atan2(front_ljx, front_ljy); // - headingDifferential;
-      float rearHeading = atan2(rear_ljx, rear_ljy); // - headingDifferential;
+      float backHeading = atan2(back_ljx, back_ljy); // - headingDifferential;
       
       #if DEBUG
-      Serial.println("(" + String(frontHeading) + ", " + String(rearHeading) + ")");
+      Serial.println("(" + String(frontHeading) + ", " + String(backHeading) + ")");
       #endif
       
-      float frontLSpeed = cos(0.25 * PI - frontHeading) * front_ljm;
-      float frontRSpeed = cos(-0.25 * PI - frontHeading) * front_ljm;
-      float rearLSpeed = cos(-0.25 * PI - rearHeading) * rear_ljm;
-      float rearRSpeed = cos(0.25 * PI - rearHeading) * rear_ljm;
+      float frontLSpeed = cos(-0.25 * PI - frontHeading) * front_ljm;
+      float frontRSpeed = cos(0.25 * PI - frontHeading) * front_ljm;
+      float backLSpeed = cos(-0.25 * PI - backHeading) * back_ljm;
+      float backRSpeed = cos(0.25 * PI - backHeading) * back_ljm;
 
       if(frontLSpeed > 1.0) frontLSpeed = 1.0;
       if(frontLSpeed < -1.0) frontLSpeed = -1.0;
       if(frontRSpeed > 1.0) frontRSpeed = 1.0;
       if(frontRSpeed < -1.0) frontRSpeed = -1.0;
-      if(rearLSpeed > 1.0) rearLSpeed = 1.0;
-      if(rearLSpeed < -1.0) rearLSpeed = -1.0;
-      if(rearRSpeed > 1.0) rearRSpeed = 1.0;
-      if(rearRSpeed < -1.0) rearRSpeed = -1.0;
+      if(backLSpeed > 1.0) backLSpeed = 1.0;
+      if(backLSpeed < -1.0) backLSpeed = -1.0;
+      if(backRSpeed > 1.0) backRSpeed = 1.0;
+      if(backRSpeed < -1.0) backRSpeed = -1.0;
       
-      motor1Speed = 100.0 * frontLSpeed;
-      motor2Speed = 100.0 * frontRSpeed;
-      motor3Speed = 100.0 * rearRSpeed;
-      motor4Speed = 100.0 * rearLSpeed;
+      frontLeftSpeed = 100.0 * frontLSpeed;
+      frontRightSpeed = 100.0 * frontRSpeed;
+      backLeftSpeed = 100.0 * backLSpeed;
+      backRightSpeed = 100.0 * backRSpeed;
       #endif
       
       keepAliveTime = millis();
@@ -539,29 +539,29 @@ void calcRPM()
 {
   float elapsed = static_cast<float>(currentTime - rpmSampleTime);
 
-  float m1PulseCount, m2PulseCount, m3PulseCount, m4PulseCount;
+  float flPulseCount, frPulseCount, blPulseCount, brPulseCount;
   
   multicore_lockout_start_blocking();
-  m1PulseCount = static_cast<float>(motor1PulseCount);
-  m2PulseCount = static_cast<float>(motor2PulseCount);
-  m3PulseCount = static_cast<float>(motor3PulseCount);
-  m4PulseCount = static_cast<float>(motor4PulseCount);
-  motor1PulseCount = 0;
-  motor2PulseCount = 0;
-  motor3PulseCount = 0;
-  motor4PulseCount = 0;
+  flPulseCount = static_cast<float>(frontLeftPulseCount);
+  frPulseCount = static_cast<float>(frontRightPulseCount);
+  blPulseCount = static_cast<float>(backLeftPulseCount);
+  brPulseCount = static_cast<float>(backRightPulseCount);
+  frontLeftPulseCount = 0;
+  frontRightPulseCount = 0;
+  backLeftPulseCount = 0;
+  backRightPulseCount = 0;
   multicore_lockout_end_blocking();
 
   float countToHz = 1000.0 / elapsed;
-  float m1PulseFreq = countToHz * m1PulseCount;
-  float m2PulseFreq = countToHz * m2PulseCount;
-  float m3PulseFreq = countToHz * m3PulseCount;
-  float m4PulseFreq = countToHz * m4PulseCount;
+  float flPulseFreq = countToHz * flPulseCount;
+  float frPulseFreq = countToHz * frPulseCount;
+  float blPulseFreq = countToHz * blPulseCount;
+  float brPulseFreq = countToHz * brPulseCount;
 
-  wheel1RPM = m1PulseFreq * PULSE_TO_RPM_FACTOR * ((motor1Speed < 0.0) ? 1.0 : -1.0);
-  wheel2RPM = m2PulseFreq * PULSE_TO_RPM_FACTOR * ((motor2Speed > 0.0) ? 1.0 : -1.0);
-  wheel3RPM = m3PulseFreq * PULSE_TO_RPM_FACTOR * ((motor3Speed > 0.0) ? 1.0 : -1.0);
-  wheel4RPM = m4PulseFreq * PULSE_TO_RPM_FACTOR * ((motor4Speed < 0.0) ? 1.0 : -1.0);
+  frontLeftRPM = flPulseFreq * PULSE_TO_RPM_FACTOR * ((frontLeftSpeed < 0.0) ? 1.0 : -1.0);
+  frontRightRPM = frPulseFreq * PULSE_TO_RPM_FACTOR * ((frontRightSpeed > 0.0) ? 1.0 : -1.0);
+  backLeftRPM = blPulseFreq * PULSE_TO_RPM_FACTOR * ((backLeftSpeed > 0.0) ? 1.0 : -1.0);
+  backRightRPM = brPulseFreq * PULSE_TO_RPM_FACTOR * ((backRightSpeed < 0.0) ? 1.0 : -1.0);
   
   rpmSampleTime = currentTime;
 }
@@ -581,10 +581,10 @@ void rfLoop() {
     outgoing.msgId = PING;
     outgoing.payload.ping.pingCount = pingCount;
     outgoing.payload.ping.heading = imuEvent.orientation.x;
-    outgoing.payload.ping.wheel1RPM = wheel1RPM;
-    outgoing.payload.ping.wheel2RPM = wheel2RPM;
-    outgoing.payload.ping.wheel3RPM = wheel3RPM;
-    outgoing.payload.ping.wheel4RPM = wheel4RPM;    
+    outgoing.payload.ping.frontLeftRPM = frontLeftRPM;
+    outgoing.payload.ping.frontRightRPM = frontRightRPM;
+    outgoing.payload.ping.backLeftRPM = backLeftRPM;
+    outgoing.payload.ping.backRightRPM = backRightRPM;    
     pingCount++;
     if(!sendMsg()) {
       #if DEBUG
@@ -600,20 +600,20 @@ void motorLoop() {
   breakState = ((currentTime - keepAliveTime) <= KEEP_ALIVE_PERIOD);
   digitalWrite(MOTOR_BRK_PIN, breakState);
   if(breakState) {
-    motor1pwm->setPWM(MOTOR1_PWM_PIN, PWM_FREQ, abs(motor1Speed));
-    motor2pwm->setPWM(MOTOR2_PWM_PIN, PWM_FREQ, abs(motor2Speed));
-    motor3pwm->setPWM(MOTOR3_PWM_PIN, PWM_FREQ, abs(motor3Speed));
-    motor4pwm->setPWM(MOTOR4_PWM_PIN, PWM_FREQ, abs(motor4Speed));
+    frontLeftPWM->setPWM(FL_PWM_PIN, PWM_FREQ, abs(frontLeftSpeed));
+    frontRightPWM->setPWM(FR_PWM_PIN, PWM_FREQ, abs(frontRightSpeed));
+    backLeftPWM->setPWM(BL_PWM_PIN, PWM_FREQ, abs(backLeftSpeed));
+    backRightPWM->setPWM(BR_PWM_PIN, PWM_FREQ, abs(backRightSpeed));
     
-    digitalWrite(MOTOR1_DIR_PIN, motor1Speed < 0.0);
-    digitalWrite(MOTOR2_DIR_PIN, motor2Speed > 0.0);
-    digitalWrite(MOTOR3_DIR_PIN, motor3Speed > 0.0);
-    digitalWrite(MOTOR4_DIR_PIN, motor4Speed < 0.0);
+    digitalWrite(FL_DIR_PIN, frontLeftSpeed < 0.0);
+    digitalWrite(FR_DIR_PIN, frontRightSpeed > 0.0);
+    digitalWrite(BL_DIR_PIN, backLeftSpeed > 0.0);
+    digitalWrite(BR_DIR_PIN, backRightSpeed < 0.0);
   } else {
-    motor1pwm->setPWM(MOTOR1_PWM_PIN, PWM_FREQ, 0);
-    motor2pwm->setPWM(MOTOR2_PWM_PIN, PWM_FREQ, 0);
-    motor3pwm->setPWM(MOTOR3_PWM_PIN, PWM_FREQ, 0);
-    motor4pwm->setPWM(MOTOR4_PWM_PIN, PWM_FREQ, 0);
+    frontLeftPWM->setPWM(FL_PWM_PIN, PWM_FREQ, 0);
+    frontRightPWM->setPWM(FR_PWM_PIN, PWM_FREQ, 0);
+    backLeftPWM->setPWM(BL_PWM_PIN, PWM_FREQ, 0);
+    backRightPWM->setPWM(BR_PWM_PIN, PWM_FREQ, 0);
     
   }
 }
@@ -666,10 +666,10 @@ void loop() {
 }
 
 void core1_setup() {
-  attachInterrupt(digitalPinToInterrupt(MOTOR1_ENC_PIN), motor1EncoderIRQ, FALLING);
-  attachInterrupt(digitalPinToInterrupt(MOTOR2_ENC_PIN), motor2EncoderIRQ, FALLING);
-  attachInterrupt(digitalPinToInterrupt(MOTOR3_ENC_PIN), motor3EncoderIRQ, FALLING);
-  attachInterrupt(digitalPinToInterrupt(MOTOR4_ENC_PIN), motor4EncoderIRQ, FALLING);
+  attachInterrupt(digitalPinToInterrupt(FL_ENC_PIN), frontLeftEncoderIRQ, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(FR_ENC_PIN), frontRightEncoderIRQ, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(BL_ENC_PIN), backLeftEncoderIRQ, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(BR_ENC_PIN), backRightEncoderIRQ, CHANGE);
 }
 
 void core1_loop() {
