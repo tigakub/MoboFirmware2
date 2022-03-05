@@ -49,8 +49,67 @@ unsigned long pingThrottleTime;
 uint32_t pingCount = 0;
 
 //* MOTOR ****************************************************************************************************************
-#include <RP2040_PWM.h>
 
+#include "Mecanum.hpp"
+
+#include "PicoPWM.hpp"
+
+#define FL_DIR_PIN 12
+#define FL_PWM_PIN 13
+#define FL_ENC_PIN 14
+#define FL_ALM_PIN 15
+
+#define FR_DIR_PIN 8
+#define FR_PWM_PIN 9
+#define FR_ENC_PIN 10
+#define FR_ALM_PIN 11
+
+#define BL_DIR_PIN 16
+#define BL_PWM_PIN 17
+#define BL_ENC_PIN 18
+#define BL_ALM_PIN 19
+
+#define BR_DIR_PIN 20
+#define BR_PWM_PIN 21
+#define BR_ENC_PIN 22
+#define BR_ALM_PIN 26
+
+// Mobo's BLDC driver break lines are all connected to pin 27
+#define BRK_PIN 27
+
+// RP2040_PWM duty cycle ranges from 0.0 to 100.0.
+#define MAX_DUTY_CYCLE 100.0
+
+// Mobo 1's BLDCs have a max RPM of 70.0
+#define MAX_RPM 70.0
+
+// Motor poles: 4
+// Pulses per revolution 3 * motor poles = 12
+// Gear ratio 50:1
+// Pulse to rpm factor = seconds per minute / pulses per revolution / gear ratio = 0.1
+#define PULSE_TO_RPM 0.1
+
+#define WHEEL_BASE_LENGTH 0.1905
+#define WHEEL_BASE_WIDTH 0.1905
+#define WHEEL_RADIUS 0.0635
+
+PicoPWM
+  frontLeftPWM(FL_PWM_PIN),
+  frontRightPWM(FR_PWM_PIN),
+  backLeftPWM(BL_PWM_PIN),
+  backRightPWM(BR_PWM_PIN);
+
+Mecanum mec(
+  frontLeftPWM, frontRightPWM, backLeftPWM, backRightPWM,
+  FL_DIR_PIN, FR_DIR_PIN, BL_DIR_PIN, BR_DIR_PIN,
+  WHEEL_BASE_LENGTH, WHEEL_BASE_WIDTH, WHEEL_RADIUS);
+  
+float frontLeftRPM = 0.0;
+float frontRightRPM = 0.0;
+float backLeftRPM = 0.0;
+float backRightRPM = 0.0;
+
+/*
 #define PWM_FREQ 2000
 
 #define FR_DIR_PIN 8
@@ -119,6 +178,7 @@ int breakState = HIGH;
 
 float frontVel[2];
 float backVel[2];
+*/
 
 //* IMU ****************************************************************************************************************
 #include <Wire.h>
@@ -198,6 +258,9 @@ void rfSetup() {
 }
 
 //* MOTOR SETUP ********************************
+
+#include "PicoPWM.hpp"
+
 void motorSetup() {
   pinMode(FL_DIR_PIN, OUTPUT);
   pinMode(FR_DIR_PIN, OUTPUT);
@@ -401,6 +464,7 @@ void handleIncoming()
       float ljx = 0.0;
       if(t.ljx < 500) ljx = (static_cast<float>(t.ljx) - 500.0) / 500.0;
       if(t.ljx > 523) ljx = (static_cast<float>(t.ljx) - 523.0) / 500.0;
+
       float ljy = 0.0;
       
       if(t.ljy < 500) ljy = (static_cast<float>(t.ljy) - 500.0) / 500.0;
@@ -579,7 +643,6 @@ void motorLoop() {
     frontRightPWM->setPWM(FR_PWM_PIN, PWM_FREQ, 0);
     backLeftPWM->setPWM(BL_PWM_PIN, PWM_FREQ, 0);
     backRightPWM->setPWM(BR_PWM_PIN, PWM_FREQ, 0);
-    
   }
 }
 
